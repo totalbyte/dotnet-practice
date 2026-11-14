@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Services/" />
+  <Folder Name="/Services/Repairs/">
+    <Project Path="Services/Repairs/Repairs.Api/Repairs.Api.csproj" />
+    <Project Path="Services/Repairs/Repairs.Bll/Repairs.Bll.csproj" />
+    <Project Path="Services/Repairs/Repairs.Dal/Repairs.Dal.csproj" />
+    <Project Path="Services/Repairs/Repairs.Domain/Repairs.Domain.csproj" />
+    <Project Path="Services/Repairs/Repairs.Tests/Repairs.Tests.csproj" />
+  </Folder>
+  <Project Path="Platform.AppHost/Platform.AppHost.csproj" />
+</Solution>

@@ -54,3 +54,7 @@ TestResult.xml
 nunit-*.xml
 # Local secrets
 .env
+
+# Visual Studio
+.vs/
+*.user

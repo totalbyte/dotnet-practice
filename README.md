@@ -1,19 +1,24 @@
-# Сервісний центр з ремонту техніки — бази даних для мікросервісної архітектури
+# Сервісний центр з ремонту техніки — платформа мікросервісів
 
-Три самостійні бази даних однієї предметної області — дві реляційні (SQL Server) та одна
-документна (MongoDB). Кожна база належить окремому мікросервісу.
+Платформа складається з трьох контекстів однієї предметної області, кожен із власною базою даних —
+дві реляційні (SQL Server) та одна документна (MongoDB). Сервіс **Repairs** реалізовано як
+тришаровий веб-API на ADO.NET і Dapper; він запускається разом зі своєю базою однією командою
+через .NET Aspire.
 
 ## Зміст
 
 1. [Предметна область](#предметна-область)
 2. [Три контексти та їхні сутності](#три-контексти-та-їхні-сутності)
 3. [Структура репозиторію](#структура-репозиторію)
-4. [ERD-діаграми](#erd-діаграми)
-5. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
-6. [Розгортання баз даних](#розгортання-баз-даних)
-7. [Перевірка після розгортання](#перевірка-після-розгортання)
-8. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
-9. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
+4. [Запуск сервісу Repairs через Aspire](#запуск-сервісу-repairs-через-aspire)
+5. [Схема рішення](#схема-рішення)
+6. [API сервісу Repairs](#api-сервісу-repairs)
+7. [ERD-діаграми](#erd-діаграми)
+8. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
+9. [Розгортання баз даних](#розгортання-баз-даних)
+10. [Перевірка після розгортання](#перевірка-після-розгортання)
+11. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
+12. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
 
 ## Предметна область
 
@@ -61,17 +66,28 @@ flowchart LR
 ## Структура репозиторію
 
 ```text
-README.md                 опис домену, розгортання БД, таблиця дублювання, ERD
+README.md                 опис домену, запуск, API, розгортання БД, таблиця дублювання, ERD
+Platform.slnx             рішення з усіма проєктами платформи
+Platform.AppHost/         оркестрація .NET Aspire: SQL Server, база RepairsDb, сервіс Repairs
+Services/
+└── Repairs/              сервіс контексту Repairs — ADO.NET + Dapper
+    ├── Repairs.Api/      контролери, обробник помилок, Program.cs, appsettings.json
+    ├── Repairs.Bll/      сервіси, DTO, профілі AutoMapper, валідація
+    ├── Repairs.Dal/      інтерфейси й реалізації репозиторіїв, Unit of Work
+    ├── Repairs.Domain/   моделі, константи, доменні винятки
+    └── Repairs.Tests/    модульні тести
 docker-compose.yml        SQL Server 2025 + MongoDB 9.0 та автоматичний запуск скриптів
 .env.example              шаблон паролів (.env у git не потрапляє)
+global.json               версія .NET SDK
 docs/
 ├── contexts.md           предметна область, контексти, сутності, агрегати
 ├── duplication-policy.md політика дублювання та логічні посилання між базами
+├── repairs-service.md    сервіс Repairs: шари, транзакції, помилки, валідація
 ├── erd-p1.md             ERD Проєкту №1: зв'язки, обмеження, індекси
 ├── erd-p2.md             ERD Проєкту №2: зв'язки, обмеження, індекси
 ├── p3-mongo-model.md     модель MongoDB: вбудовування, посилання, гібрид
 ├── p3-documents/         приклади документів MongoDB у форматі JSON
-└── img/                  зображення ERD (erd-p1.svg, erd-p2.svg)
+└── img/                  зображення ERD, знімки Swagger і Aspire Dashboard
 db/
 ├── p1/                   Проєкт №1 — RepairsDb
 │   ├── schema.sql        таблиці, ключі, обмеження, індекси, view, роль застосунку
@@ -86,6 +102,190 @@ db/
     ├── collections.js    колекції, JSON Schema-валідація, індекси
     ├── seed.js           тестові документи (ідемпотентно)
     └── queries.js        запити перевірки та aggregation pipeline
+```
+
+## Запуск сервісу Repairs через Aspire
+
+Потрібні [.NET SDK 10](https://dotnet.microsoft.com/download) і запущений
+[Docker](https://docs.docker.com/get-docker/). Файл `.env` для цього не потрібен.
+
+```bash
+dotnet run --project Platform.AppHost
+```
+
+Команда піднімає контейнер SQL Server, створює в ньому базу `RepairsDb` зі скриптів
+`db/p1/schema.sql`, `procedures.sql`, `seed.sql` і запускає API. У консолі з'являється посилання на
+Aspire Dashboard; ресурси `sql`, `RepairsDb` і `repairs-api` мають перейти в стан **Running**.
+Перший запуск триває довше: завантажується образ і стартує SQL Server.
+
+![Aspire Dashboard: ресурси sql, RepairsDb і repairs-api у стані Running](docs/img/aspire-dashboard.png)
+
+| Що | Адреса |
+|----|--------|
+| Swagger UI | `http://localhost:5077/swagger` |
+| API | `http://localhost:5077/api/...` |
+| Aspire Dashboard | посилання з консолі (`https://localhost:17028/login?t=...`) |
+
+![Swagger UI з переліком ендпоінтів](docs/img/swagger.jpeg)
+
+Ресурс бази в AppHost має ім'я `RepairsDb` — те саме, що й рядок підключення в
+`Services/Repairs/Repairs.Api/appsettings.json`, тому Aspire передає його в API змінною оточення
+`ConnectionStrings__RepairsDb` без змін у коді сервісу. Пароль SQL Server Aspire генерує сам і
+зберігає в секретах користувача.
+
+Дані зберігаються в томі Docker і переживають перезапуск; скрипти ідемпотентні, тож повторний старт
+нічого не дублює. Повернутися до початкових даних — зупинити AppHost і видалити том:
+
+```bash
+docker volume ls --filter name=sql-data
+```
+
+```bash
+docker volume rm <назва тому>
+```
+
+Запустити API без Aspire, з базою з `docker compose`, можна, перевизначивши рядок підключення
+змінною оточення (PowerShell):
+
+```powershell
+$env:ConnectionStrings__RepairsDb = "Server=127.0.0.1,1433;Database=RepairsDb;User Id=sa;Password=<SA_PASSWORD>;TrustServerCertificate=True"
+dotnet run --project Services/Repairs/Repairs.Api
+```
+
+Модульні тести:
+
+```bash
+dotnet test Platform.slnx
+```
+
+## Схема рішення
+
+```mermaid
+flowchart TB
+    AppHost["Platform.AppHost<br/>.NET Aspire"] -->|запускає| Api
+    AppHost -->|запускає контейнер,<br/>застосовує db/p1| Db[("SQL Server<br/>RepairsDb")]
+    AppHost -.->|ConnectionStrings__RepairsDb| Api
+
+    subgraph Repairs["Services/Repairs"]
+        Api["Repairs.Api<br/>контролери, ProblemDetails, Swagger"] --> Bll["Repairs.Bll<br/>сервіси, DTO, AutoMapper"]
+        Bll --> Dal["Repairs.Dal<br/>репозиторії ADO.NET і Dapper, Unit of Work"]
+        Bll --> Domain["Repairs.Domain<br/>моделі, винятки"]
+        Dal --> Domain
+    end
+
+    Dal --> Db
+```
+
+- **Repairs.Api** — тонкі асинхронні контролери: приймають DTO, викликають сервіс, повертають статус.
+  Винятки перетворює на відповіді один глобальний обробник.
+- **Repairs.Bll** — бізнес-правила й транзакційні операції через Unit of Work.
+- **Repairs.Dal** — єдине місце із SQL: один репозиторій на чистому ADO.NET (`CustomerRepository`),
+  два на Dapper зі спільною базою `BaseDapperRepository<T>` (`RepairOrderRepository`,
+  `CatalogItemRepository`), `UnitOfWork` з одним з'єднанням і транзакцією на запит.
+- **Repairs.Domain** — моделі таблиць і доменні винятки, спільні для DAL і BLL.
+
+Транзакції, рівень ізоляції, таймаути й перетворення помилок описано в
+[`docs/repairs-service.md`](docs/repairs-service.md).
+
+## API сервісу Repairs
+
+| Метод | Шлях | Призначення | Успіх |
+|-------|------|-------------|-------|
+| GET | `/api/customers?phone=` | клієнти, пошук за телефоном | 200 |
+| GET | `/api/customers/{id}` | клієнт | 200 |
+| POST | `/api/customers` | створити клієнта | 201 + `Location` |
+| PUT | `/api/customers/{id}` | змінити клієнта | 204 |
+| DELETE | `/api/customers/{id}` | м'яко видалити клієнта без незавершених замовлень | 204 |
+| GET | `/api/catalog-items` | активні позиції локальної копії каталогу | 200 |
+| GET | `/api/catalog-items/{id}` | позиція каталогу | 200 |
+| PUT | `/api/catalog-items/{id}/stock` | задати залишок на складі | 204 |
+| GET | `/api/repair-orders?status=&customerId=&page=&pageSize=` | список замовлень зі сторінками | 200 |
+| GET | `/api/repair-orders/{id}` | замовлення з пристроєм, кошторисом та історією статусів | 200 |
+| POST | `/api/repair-orders` | прийняти пристрій і скласти кошторис — **одна транзакція** | 201 + `Location` |
+| POST | `/api/repair-orders/{id}/items` | додати позицію зі знімком назви й ціни, списати залишок — **одна транзакція** | 201 + `Location` |
+| POST | `/api/repair-orders/{id}/status` | змінити статус (`usp_ChangeRepairOrderStatus`) | 204 |
+| PUT | `/api/repair-orders/{id}/details` | оновити опис дефекту й діагностику за `rowVersion` | 204 |
+| DELETE | `/api/repair-orders/{id}` | м'яко видалити видане або скасоване замовлення | 204 |
+
+Помилки повертаються у форматі ProblemDetails (`application/problem+json`): **400** — некоректні
+вхідні дані, **404** — запис не знайдено, **409** — порушено бізнес-правило (недопустимий перехід
+статусу, брак залишку, дубль ключа, застарілий `rowVersion`), **500** — непередбачена помилка.
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "Status transition is not allowed: Approved -> Approved",
+  "traceId": "b6e0c2a7a7867fc7d52ff86ec36d2573"
+}
+```
+
+### Приклади запитів
+
+Приклади розраховано на початкові дані. У PowerShell замість `curl` пишіть `curl.exe`, а тіло запиту
+зручніше надсилати через Swagger UI.
+
+Список замовлень у статусі `Diagnosed` і одне замовлення повністю:
+
+```bash
+curl "http://localhost:5077/api/repair-orders?status=Diagnosed&page=1&pageSize=10"
+```
+
+```bash
+curl http://localhost:5077/api/repair-orders/1
+```
+
+Створити клієнта (апостроф у прізвищі передається параметром запиту, а не текстом SQL):
+
+```bash
+curl -i -X POST http://localhost:5077/api/customers -H "Content-Type: application/json" -d "{\"fullName\":\"Liam O'Brien\",\"email\":\"liam.obrien@example.com\",\"phone\":\"+380991234567\"}"
+```
+
+Прийняти пристрій із кошторисом — замовлення, деталі, історія, позиції та списання залишку в одній
+транзакції; відповідь `201 Created` із заголовком `Location`:
+
+```bash
+curl -i -X POST http://localhost:5077/api/repair-orders -H "Content-Type: application/json" -d "{\"customerId\":2,\"deviceType\":\"Smartphone\",\"deviceBrand\":\"Apple\",\"deviceModel\":\"iPhone 13\",\"defectDescription\":\"Cracked screen\",\"createdBy\":\"reception\",\"items\":[{\"catalogItemId\":6,\"quantity\":1},{\"catalogItemId\":1,\"quantity\":2,\"discount\":100}]}"
+```
+
+Відкат транзакції: третьої позиції бракує на складі, тому відповідь `409`, замовлення не створено,
+а залишок позиції 2 не змінився:
+
+```bash
+curl -i -X POST http://localhost:5077/api/repair-orders -H "Content-Type: application/json" -d "{\"customerId\":2,\"deviceType\":\"Smartphone\",\"deviceModel\":\"iPhone 13\",\"defectDescription\":\"Battery drains quickly\",\"items\":[{\"catalogItemId\":6,\"quantity\":1},{\"catalogItemId\":2,\"quantity\":1},{\"catalogItemId\":1,\"quantity\":99}]}"
+```
+
+```bash
+curl http://localhost:5077/api/catalog-items/2
+```
+
+Погодити кошторис замовлення 3 — `204 No Content`; повторний такий самий запит — `409`:
+
+```bash
+curl -i -X POST http://localhost:5077/api/repair-orders/3/status -H "Content-Type: application/json" -d "{\"status\":\"Approved\",\"comment\":\"Approved by phone\",\"changedBy\":\"reception\"}"
+```
+
+Додати позицію до замовлення 4:
+
+```bash
+curl -i -X POST http://localhost:5077/api/repair-orders/4/items -H "Content-Type: application/json" -d "{\"catalogItemId\":5,\"quantity\":2,\"addedBy\":\"master.ivan\"}"
+```
+
+Неіснуючий ідентифікатор — `404 Not Found`:
+
+```bash
+curl -i http://localhost:5077/api/repair-orders/999
+```
+
+Видалити незавершене замовлення не можна — `409`; скасоване замовлення 5 видаляється з `204`:
+
+```bash
+curl -i -X DELETE http://localhost:5077/api/repair-orders/4
+```
+
+```bash
+curl -i -X DELETE http://localhost:5077/api/repair-orders/5
 ```
 
 ## ERD-діаграми
@@ -314,6 +514,10 @@ USE RepairsDb;
 CREATE USER repairs_service FOR LOGIN repairs_service;
 ALTER ROLE repairs_app ADD MEMBER repairs_service;
 ```
+
+Сервіс Repairs сумісний із цією роллю: він не виконує `DELETE` і не змінює схему. Під час
+локального запуску через Aspire API підключається обліковим записом, який Aspire створює для
+контейнера; у розгорнутому середовищі в рядку підключення вказують логін сервісу.
 
 **Аудит, м'яке видалення, конкурентність.** Таблиці мають `CreatedAt`, `CreatedBy`, `UpdatedAt`,
 `UpdatedBy`, `IsDeleted`; там, де один рядок можуть одночасно змінювати двоє користувачів, —
