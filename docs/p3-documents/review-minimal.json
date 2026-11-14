@@ -1,0 +1,22 @@
+{
+  "_id": {
+    "$oid": "671000000000000000000006"
+  },
+  "author": {
+    "customerId": {
+      "$numberLong": "3"
+    },
+    "displayName": "Марія Бондаренко"
+  },
+  "catalogItemId": {
+    "$numberLong": "3"
+  },
+  "createdAt": {
+    "$date": "2026-11-08T16:20:00Z"
+  },
+  "itemName": "Акумулятор для Samsung Galaxy S22",
+  "rating": 5,
+  "reviewType": "item",
+  "text": "Тримає заряд як новий.",
+  "version": 1
+}

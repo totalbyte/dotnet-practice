@@ -1,0 +1,28 @@
+{
+  "_id": {
+    "$oid": "673000000000000000000003"
+  },
+  "attachments": [
+    {
+      "fileName": "true-tone.jpg",
+      "url": "reviews/672-1/true-tone.jpg"
+    }
+  ],
+  "author": {
+    "customerId": {
+      "$numberLong": "1"
+    },
+    "displayName": "Олена Коваленко",
+    "role": "customer"
+  },
+  "createdAt": {
+    "$date": "2026-10-07T08:10:00Z"
+  },
+  "discussionId": {
+    "$oid": "672000000000000000000001"
+  },
+  "replyToMessageId": {
+    "$oid": "673000000000000000000001"
+  },
+  "text": "Підтверджую, у мене True Tone працює."
+}

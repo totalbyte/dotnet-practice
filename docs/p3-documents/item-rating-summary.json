@@ -1,0 +1,21 @@
+{
+  "_id": {
+    "$numberLong": "1"
+  },
+  "itemName": "Екран OLED для iPhone 13",
+  "reviewsCount": 2,
+  "lastReviewAt": {
+    "$date": "2026-11-05T20:45:00Z"
+  },
+  "averageRating": 3,
+  "ratingHistogram": {
+    "r1": 0,
+    "r2": 1,
+    "r3": 0,
+    "r4": 1,
+    "r5": 0
+  },
+  "updatedAt": {
+    "$date": "2026-11-14T09:57:06.233Z"
+  }
+}

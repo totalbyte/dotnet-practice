@@ -1,0 +1,75 @@
+{
+  "_id": {
+    "$oid": "671000000000000000000001"
+  },
+  "author": {
+    "customerId": {
+      "$numberLong": "1"
+    },
+    "displayName": "Олена Коваленко"
+  },
+  "comments": [
+    {
+      "authorName": "Андрій",
+      "text": "Скільки коштувало, якщо не секрет?",
+      "createdAt": {
+        "$date": "2026-10-05T09:12:00Z"
+      }
+    },
+    {
+      "authorName": "Олена Коваленко",
+      "text": "4700 грн разом із роботою.",
+      "createdAt": {
+        "$date": "2026-10-05T10:40:00Z"
+      }
+    }
+  ],
+  "commentsCount": 2,
+  "createdAt": {
+    "$date": "2026-10-04T08:30:00Z"
+  },
+  "device": {
+    "type": "Smartphone",
+    "brand": "Apple",
+    "model": "iPhone 13"
+  },
+  "photos": [
+    "reviews/671-1/before.jpg",
+    "reviews/671-1/after.jpg"
+  ],
+  "rating": 5,
+  "repairOrderId": {
+    "$numberLong": "1"
+  },
+  "reviewType": "repair",
+  "staffReply": {
+    "authorName": "Сервісний центр",
+    "text": "Дякуємо за відгук! Гарантія на екран — 6 місяців.",
+    "repliedAt": {
+      "$date": "2026-10-04T12:00:00Z"
+    }
+  },
+  "technician": {
+    "displayName": "Іван"
+  },
+  "text": "Розбила екран, думала, що телефону кінець. Замінили швидко, сенсор працює як новий.",
+  "title": "Екран замінили за два дні",
+  "updatedAt": {
+    "$date": "2026-10-05T10:40:00Z"
+  },
+  "usedItems": [
+    {
+      "catalogItemId": {
+        "$numberLong": "1"
+      },
+      "itemName": "Екран OLED для iPhone 13"
+    },
+    {
+      "catalogItemId": {
+        "$numberLong": "7"
+      },
+      "itemName": "Заміна екрана смартфона"
+    }
+  ],
+  "version": 3
+}

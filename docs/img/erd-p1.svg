@@ -1,0 +1,168 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 700" font-family="Segoe UI, Arial, sans-serif">
+<rect width="100%" height="100%" fill="#ffffff"/>
+<text x="30" y="34" font-size="20" font-weight="700" fill="#1f2937">ERD — Проєкт №1: RepairsDb (контекст Repairs)</text>
+<text x="30" y="56" font-size="13" fill="#4b5563">SQL Server · усі зовнішні ключі — лише всередині цієї бази</text>
+<path d="M330 151.8 L390 151.8 L390 158.1 L450 158.1" fill="none" stroke="#2563eb" stroke-width="2"/>
+<text x="340" y="144.8" font-size="14" font-weight="700" fill="#1d4ed8">1</text>
+<text x="432" y="151.1" font-size="14" font-weight="700" fill="#1d4ed8">N</text>
+<text x="396" y="148.95" font-size="12" fill="#1e3a8a">1:N</text>
+<path d="M750 158.1 L810 158.1 L810 158.1 L870 158.1" fill="none" stroke="#2563eb" stroke-width="2"/>
+<text x="760" y="151.1" font-size="14" font-weight="700" fill="#1d4ed8">1</text>
+<text x="852" y="151.1" font-size="14" font-weight="700" fill="#1d4ed8">1</text>
+<text x="772" y="178" font-size="12" fill="#1e3a8a">1:1 (PK = FK)</text>
+<path d="M600 317 L600 358.5 L600 358.5 L600 400" fill="none" stroke="#2563eb" stroke-width="2"/>
+<text x="608" y="335" font-size="14" font-weight="700" fill="#1d4ed8">1</text>
+<text x="608" y="392" font-size="14" font-weight="700" fill="#1d4ed8">N</text>
+<text x="606" y="352.5" font-size="12" fill="#1e3a8a">1:N, CASCADE</text>
+<path d="M330 461.8 L390 461.8 L390 461.8 L450 461.8" fill="none" stroke="#2563eb" stroke-width="2"/>
+<text x="340" y="454.8" font-size="14" font-weight="700" fill="#1d4ed8">1</text>
+<text x="432" y="454.8" font-size="14" font-weight="700" fill="#1d4ed8">N</text>
+<text x="396" y="455.8" font-size="12" fill="#1e3a8a">1:N</text>
+<path d="M750 271.6 L810 271.6 L810 455.5 L870 455.5" fill="none" stroke="#2563eb" stroke-width="2"/>
+<text x="760" y="264.6" font-size="14" font-weight="700" fill="#1d4ed8">1</text>
+<text x="852" y="448.5" font-size="14" font-weight="700" fill="#1d4ed8">N</text>
+<text x="762" y="340" font-size="12" fill="#1e3a8a">1:N, CASCADE</text>
+<rect x="30" y="90" width="300" height="206" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
+<path d="M30 120 L30 96 Q30 90 36 90 L324 90 Q330 90 330 96 L330 120 Z" fill="#1f2937"/>
+<text x="40" y="110" font-size="14" font-weight="700" fill="#ffffff">Customers</text>
+<text x="40" y="136" font-size="12" font-weight="700" fill="#111827">Id</text>
+<text x="180" y="136" font-size="11" fill="#6b7280">BIGINT IDENTITY</text>
+<text x="320" y="136" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">PK</text>
+<text x="40" y="157" font-size="12" font-weight="400" fill="#111827">FullName</text>
+<text x="180" y="157" font-size="11" fill="#6b7280">NVARCHAR(200)</text>
+<text x="40" y="178" font-size="12" font-weight="400" fill="#111827">Email</text>
+<text x="180" y="178" font-size="11" fill="#6b7280">NVARCHAR(256)</text>
+<text x="320" y="178" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">UQ</text>
+<text x="40" y="199" font-size="12" font-weight="400" fill="#111827">Phone</text>
+<text x="180" y="199" font-size="11" fill="#6b7280">NVARCHAR(20)</text>
+<text x="320" y="199" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">IX</text>
+<text x="40" y="220" font-size="12" font-weight="400" fill="#111827">CreatedAt / CreatedBy</text>
+<text x="180" y="220" font-size="11" fill="#6b7280">аудит</text>
+<text x="40" y="241" font-size="12" font-weight="400" fill="#111827">UpdatedAt / UpdatedBy</text>
+<text x="180" y="241" font-size="11" fill="#6b7280">аудит</text>
+<text x="40" y="262" font-size="12" font-weight="400" fill="#111827">IsDeleted</text>
+<text x="180" y="262" font-size="11" fill="#6b7280">BIT</text>
+<text x="40" y="283" font-size="12" font-weight="400" fill="#111827">RowVersion</text>
+<text x="180" y="283" font-size="11" fill="#6b7280">ROWVERSION</text>
+<rect x="450" y="90" width="300" height="227" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
+<path d="M450 120 L450 96 Q450 90 456 90 L744 90 Q750 90 750 96 L750 120 Z" fill="#1f2937"/>
+<text x="460" y="110" font-size="14" font-weight="700" fill="#ffffff">RepairOrders</text>
+<text x="460" y="136" font-size="12" font-weight="700" fill="#111827">Id</text>
+<text x="600" y="136" font-size="11" fill="#6b7280">BIGINT IDENTITY</text>
+<text x="740" y="136" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">PK</text>
+<text x="460" y="157" font-size="12" font-weight="400" fill="#111827">CustomerId</text>
+<text x="600" y="157" font-size="11" fill="#6b7280">BIGINT</text>
+<text x="740" y="157" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">FK</text>
+<text x="460" y="178" font-size="12" font-weight="400" fill="#111827">Status</text>
+<text x="600" y="178" font-size="11" fill="#6b7280">NVARCHAR(30)</text>
+<text x="740" y="178" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">CHECK</text>
+<text x="460" y="199" font-size="12" font-weight="400" fill="#111827">AcceptedAt</text>
+<text x="600" y="199" font-size="11" fill="#6b7280">DATETIME2</text>
+<text x="460" y="220" font-size="12" font-weight="400" fill="#111827">IssuedAt</text>
+<text x="600" y="220" font-size="11" fill="#6b7280">DATETIME2</text>
+<text x="460" y="241" font-size="12" font-weight="400" fill="#111827">CreatedAt / CreatedBy</text>
+<text x="600" y="241" font-size="11" fill="#6b7280">аудит</text>
+<text x="460" y="262" font-size="12" font-weight="400" fill="#111827">UpdatedAt / UpdatedBy</text>
+<text x="600" y="262" font-size="11" fill="#6b7280">аудит</text>
+<text x="460" y="283" font-size="12" font-weight="400" fill="#111827">IsDeleted</text>
+<text x="600" y="283" font-size="11" fill="#6b7280">BIT</text>
+<text x="460" y="304" font-size="12" font-weight="400" fill="#111827">RowVersion</text>
+<text x="600" y="304" font-size="11" fill="#6b7280">ROWVERSION</text>
+<rect x="870" y="90" width="300" height="227" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
+<path d="M870 120 L870 96 Q870 90 876 90 L1164 90 Q1170 90 1170 96 L1170 120 Z" fill="#1f2937"/>
+<text x="880" y="110" font-size="14" font-weight="700" fill="#ffffff">RepairOrderDetails</text>
+<text x="880" y="136" font-size="12" font-weight="700" fill="#111827">RepairOrderId</text>
+<text x="1020" y="136" font-size="11" fill="#6b7280">BIGINT</text>
+<text x="1160" y="136" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">PK, FK</text>
+<text x="880" y="157" font-size="12" font-weight="400" fill="#111827">DeviceType</text>
+<text x="1020" y="157" font-size="11" fill="#6b7280">NVARCHAR(50)</text>
+<text x="1160" y="157" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">CHECK</text>
+<text x="880" y="178" font-size="12" font-weight="400" fill="#111827">DeviceBrand</text>
+<text x="1020" y="178" font-size="11" fill="#6b7280">NVARCHAR(100)</text>
+<text x="880" y="199" font-size="12" font-weight="400" fill="#111827">DeviceModel</text>
+<text x="1020" y="199" font-size="11" fill="#6b7280">NVARCHAR(100)</text>
+<text x="880" y="220" font-size="12" font-weight="400" fill="#111827">SerialNumber</text>
+<text x="1020" y="220" font-size="11" fill="#6b7280">NVARCHAR(100)</text>
+<text x="1160" y="220" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">IX</text>
+<text x="880" y="241" font-size="12" font-weight="400" fill="#111827">DefectDescription</text>
+<text x="1020" y="241" font-size="11" fill="#6b7280">NVARCHAR(1000)</text>
+<text x="880" y="262" font-size="12" font-weight="400" fill="#111827">DiagnosticNotes</text>
+<text x="1020" y="262" font-size="11" fill="#6b7280">NVARCHAR(2000)</text>
+<text x="880" y="283" font-size="12" font-weight="400" fill="#111827">UpdatedAt / UpdatedBy</text>
+<text x="1020" y="283" font-size="11" fill="#6b7280">аудит</text>
+<text x="880" y="304" font-size="12" font-weight="400" fill="#111827">RowVersion</text>
+<text x="1020" y="304" font-size="11" fill="#6b7280">ROWVERSION</text>
+<rect x="870" y="400" width="300" height="185" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
+<path d="M870 430 L870 406 Q870 400 876 400 L1164 400 Q1170 400 1170 406 L1170 430 Z" fill="#1f2937"/>
+<text x="880" y="420" font-size="14" font-weight="700" fill="#ffffff">RepairOrderStatusHistory</text>
+<text x="880" y="446" font-size="12" font-weight="700" fill="#111827">Id</text>
+<text x="1020" y="446" font-size="11" fill="#6b7280">BIGINT IDENTITY</text>
+<text x="1160" y="446" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">PK</text>
+<text x="880" y="467" font-size="12" font-weight="400" fill="#111827">RepairOrderId</text>
+<text x="1020" y="467" font-size="11" fill="#6b7280">BIGINT</text>
+<text x="1160" y="467" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">FK</text>
+<text x="880" y="488" font-size="12" font-weight="400" fill="#111827">FromStatus</text>
+<text x="1020" y="488" font-size="11" fill="#6b7280">NVARCHAR(30)</text>
+<text x="880" y="509" font-size="12" font-weight="400" fill="#111827">ToStatus</text>
+<text x="1020" y="509" font-size="11" fill="#6b7280">NVARCHAR(30)</text>
+<text x="1160" y="509" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">CHECK</text>
+<text x="880" y="530" font-size="12" font-weight="400" fill="#111827">Comment</text>
+<text x="1020" y="530" font-size="11" fill="#6b7280">NVARCHAR(500)</text>
+<text x="880" y="551" font-size="12" font-weight="400" fill="#111827">ChangedAt</text>
+<text x="1020" y="551" font-size="11" fill="#6b7280">DATETIME2</text>
+<text x="880" y="572" font-size="12" font-weight="400" fill="#111827">ChangedBy</text>
+<text x="1020" y="572" font-size="11" fill="#6b7280">NVARCHAR(100)</text>
+<rect x="450" y="400" width="300" height="206" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
+<path d="M450 430 L450 406 Q450 400 456 400 L744 400 Q750 400 750 406 L750 430 Z" fill="#7c2d12"/>
+<text x="460" y="420" font-size="14" font-weight="700" fill="#ffffff">RepairOrderItems</text>
+<text x="740" y="420" font-size="11" fill="#e5e7eb" text-anchor="end">проміжна таблиця M:N</text>
+<text x="460" y="446" font-size="12" font-weight="700" fill="#111827">RepairOrderId</text>
+<text x="600" y="446" font-size="11" fill="#6b7280">BIGINT</text>
+<text x="740" y="446" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">PK, FK</text>
+<text x="460" y="467" font-size="12" font-weight="700" fill="#111827">CatalogItemId</text>
+<text x="600" y="467" font-size="11" fill="#6b7280">BIGINT</text>
+<text x="740" y="467" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">PK, FK</text>
+<text x="460" y="488" font-size="12" font-weight="400" fill="#111827">ItemName</text>
+<text x="600" y="488" font-size="11" fill="#6b7280">NVARCHAR(200)</text>
+<text x="740" y="488" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">знімок</text>
+<text x="460" y="509" font-size="12" font-weight="400" fill="#111827">UnitPrice</text>
+<text x="600" y="509" font-size="11" fill="#6b7280">DECIMAL(18,2)</text>
+<text x="740" y="509" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">знімок</text>
+<text x="460" y="530" font-size="12" font-weight="400" fill="#111827">Quantity</text>
+<text x="600" y="530" font-size="11" fill="#6b7280">INT</text>
+<text x="740" y="530" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">CHECK</text>
+<text x="460" y="551" font-size="12" font-weight="400" fill="#111827">Discount</text>
+<text x="600" y="551" font-size="11" fill="#6b7280">DECIMAL(18,2)</text>
+<text x="740" y="551" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">CHECK</text>
+<text x="460" y="572" font-size="12" font-weight="400" fill="#111827">LineTotal</text>
+<text x="600" y="572" font-size="11" fill="#6b7280">обчислюване</text>
+<text x="460" y="593" font-size="12" font-weight="400" fill="#111827">AddedAt / AddedBy</text>
+<text x="600" y="593" font-size="11" fill="#6b7280">аудит</text>
+<rect x="30" y="400" width="300" height="206" rx="6" fill="#f9fafb" stroke="#374151" stroke-width="1.5"/>
+<path d="M30 430 L30 406 Q30 400 36 400 L324 400 Q330 400 330 406 L330 430 Z" fill="#065f46"/>
+<text x="40" y="420" font-size="14" font-weight="700" fill="#ffffff">CatalogItems</text>
+<text x="320" y="420" font-size="11" fill="#e5e7eb" text-anchor="end">локальна копія Каталогу</text>
+<text x="40" y="446" font-size="12" font-weight="700" fill="#111827">Id</text>
+<text x="180" y="446" font-size="11" fill="#6b7280">BIGINT (без IDENTITY)</text>
+<text x="320" y="446" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">PK</text>
+<text x="40" y="467" font-size="12" font-weight="400" fill="#111827">Name</text>
+<text x="180" y="467" font-size="11" fill="#6b7280">NVARCHAR(200)</text>
+<text x="320" y="467" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">копія</text>
+<text x="40" y="488" font-size="12" font-weight="400" fill="#111827">ItemType</text>
+<text x="180" y="488" font-size="11" fill="#6b7280">NVARCHAR(20)</text>
+<text x="320" y="488" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">копія</text>
+<text x="40" y="509" font-size="12" font-weight="400" fill="#111827">Price</text>
+<text x="180" y="509" font-size="11" fill="#6b7280">DECIMAL(18,2)</text>
+<text x="320" y="509" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">копія</text>
+<text x="40" y="530" font-size="12" font-weight="400" fill="#111827">Stock</text>
+<text x="180" y="530" font-size="11" fill="#6b7280">INT</text>
+<text x="320" y="530" font-size="11" font-weight="700" fill="#b45309" text-anchor="end">CHECK</text>
+<text x="40" y="551" font-size="12" font-weight="400" fill="#111827">IsActive</text>
+<text x="180" y="551" font-size="11" fill="#6b7280">BIT</text>
+<text x="40" y="572" font-size="12" font-weight="400" fill="#111827">SyncedAt</text>
+<text x="180" y="572" font-size="11" fill="#6b7280">DATETIME2</text>
+<text x="40" y="593" font-size="12" font-weight="400" fill="#111827">RowVersion</text>
+<text x="180" y="593" font-size="11" fill="#6b7280">ROWVERSION</text>
+<text x="30" y="650" font-size="13" fill="#374151">M:N  RepairOrders ↔ CatalogItems реалізовано через RepairOrderItems (два FK + власні поля).</text>
+<text x="30" y="672" font-size="13" fill="#374151">CatalogItems.Id — ідентифікатор із CatalogDb: звичайний стовпець, FOREIGN KEY на іншу базу немає.</text>
+</svg>

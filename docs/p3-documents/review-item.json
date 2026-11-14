@@ -1,0 +1,43 @@
+{
+  "_id": {
+    "$oid": "671000000000000000000002"
+  },
+  "author": {
+    "customerId": {
+      "$numberLong": "1"
+    },
+    "displayName": "Олена Коваленко"
+  },
+  "catalogItemId": {
+    "$numberLong": "1"
+  },
+  "comments": [
+    {
+      "authorName": "Марія",
+      "text": "А True Tone після заміни працює?",
+      "createdAt": {
+        "$date": "2026-10-06T14:00:00Z"
+      }
+    }
+  ],
+  "commentsCount": 1,
+  "cons": [
+    "Висока ціна"
+  ],
+  "createdAt": {
+    "$date": "2026-10-05T18:00:00Z"
+  },
+  "discussionId": {
+    "$oid": "672000000000000000000001"
+  },
+  "itemName": "Екран OLED для iPhone 13",
+  "pros": [
+    "OLED-матриця",
+    "Гарантія 6 місяців"
+  ],
+  "rating": 4,
+  "reviewType": "item",
+  "text": "Кольори та яскравість на рівні оригіналу. Ціна кусається.",
+  "title": "Якісний екран, але недешевий",
+  "version": 2
+}
