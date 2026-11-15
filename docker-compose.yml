@@ -35,7 +35,7 @@ services:
     command:
       - |
         set -e
-        for f in p1/schema.sql p1/procedures.sql p1/seed.sql p2/schema.sql p2/seed.sql; do
+        for f in p1/schema.sql p1/procedures.sql p1/seed.sql; do
           echo ">>> $$f"
           /opt/mssql-tools18/bin/sqlcmd -S sqlserver -U sa -C -b -I -i "/db/$$f"
         done
