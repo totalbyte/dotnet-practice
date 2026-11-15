@@ -1,6 +1,7 @@
 <Project Sdk="Aspire.AppHost.Sdk/13.6.5">
 
   <ItemGroup>
+    <ProjectReference Include="..\Services\Catalog\Catalog.Api\Catalog.Api.csproj" />
     <ProjectReference Include="..\Services\Repairs\Repairs.Api\Repairs.Api.csproj" />
   </ItemGroup>
 

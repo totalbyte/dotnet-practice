@@ -17,4 +17,10 @@ builder.AddProject<Projects.Repairs_Api>("repairs-api")
     .WithReference(repairsDb)
     .WaitFor(repairsDb);
 
+var catalogDb = sql.AddDatabase("CatalogDb");
+
+builder.AddProject<Projects.Catalog_Api>("catalog-api")
+    .WithReference(catalogDb)
+    .WaitFor(catalogDb);
+
 builder.Build().Run();
