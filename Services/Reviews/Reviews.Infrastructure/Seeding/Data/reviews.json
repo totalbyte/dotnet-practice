@@ -1,0 +1,264 @@
+[
+  {
+    "_id": {
+      "$oid": "671000000000000000000001"
+    },
+    "reviewType": "repair",
+    "rating": 5,
+    "title": "Екран замінили за два дні",
+    "text": "Розбила екран, думала, що телефону кінець. Замінили швидко, сенсор працює як новий.",
+    "author": {
+      "customerId": {
+        "$numberLong": "1"
+      },
+      "displayName": "Олена Коваленко"
+    },
+    "repairOrderId": {
+      "$numberLong": "1"
+    },
+    "device": {
+      "type": "Smartphone",
+      "brand": "Apple",
+      "model": "iPhone 13"
+    },
+    "technician": {
+      "displayName": "Іван"
+    },
+    "usedItems": [
+      {
+        "catalogItemId": {
+          "$numberLong": "1"
+        },
+        "itemName": "Екран OLED для iPhone 13"
+      },
+      {
+        "catalogItemId": {
+          "$numberLong": "7"
+        },
+        "itemName": "Заміна екрана смартфона"
+      }
+    ],
+    "photos": [
+      "reviews/671-1/before.jpg",
+      "reviews/671-1/after.jpg"
+    ],
+    "comments": [
+      {
+        "authorName": "Андрій",
+        "text": "Скільки коштувало, якщо не секрет?",
+        "createdAt": {
+          "$date": "2026-10-05T09:12:00Z"
+        }
+      },
+      {
+        "authorName": "Олена Коваленко",
+        "text": "4700 грн разом із роботою.",
+        "createdAt": {
+          "$date": "2026-10-05T10:40:00Z"
+        }
+      }
+    ],
+    "commentsCount": 2,
+    "staffReply": {
+      "authorName": "Сервісний центр",
+      "text": "Дякуємо за відгук! Гарантія на екран — 6 місяців.",
+      "repliedAt": {
+        "$date": "2026-10-04T12:00:00Z"
+      }
+    },
+    "createdAt": {
+      "$date": "2026-10-04T08:30:00Z"
+    },
+    "updatedAt": {
+      "$date": "2026-10-05T10:40:00Z"
+    },
+    "version": 3
+  },
+  {
+    "_id": {
+      "$oid": "671000000000000000000002"
+    },
+    "reviewType": "item",
+    "rating": 4,
+    "title": "Якісний екран, але недешевий",
+    "text": "Кольори та яскравість на рівні оригіналу. Ціна кусається.",
+    "author": {
+      "customerId": {
+        "$numberLong": "1"
+      },
+      "displayName": "Олена Коваленко"
+    },
+    "catalogItemId": {
+      "$numberLong": "1"
+    },
+    "itemName": "Екран OLED для iPhone 13",
+    "pros": [
+      "OLED-матриця",
+      "Гарантія 6 місяців"
+    ],
+    "cons": [
+      "Висока ціна"
+    ],
+    "comments": [
+      {
+        "authorName": "Марія",
+        "text": "А True Tone після заміни працює?",
+        "createdAt": {
+          "$date": "2026-10-06T14:00:00Z"
+        }
+      }
+    ],
+    "commentsCount": 1,
+    "discussionId": {
+      "$oid": "672000000000000000000001"
+    },
+    "createdAt": {
+      "$date": "2026-10-05T18:00:00Z"
+    },
+    "version": 2
+  },
+  {
+    "_id": {
+      "$oid": "671000000000000000000003"
+    },
+    "reviewType": "item",
+    "rating": 5,
+    "title": "Ноутбук ожив",
+    "text": "Після встановлення SSD система завантажується за 10 секунд.",
+    "author": {
+      "customerId": {
+        "$numberLong": "2"
+      },
+      "displayName": "Андрій Шевченко"
+    },
+    "catalogItemId": {
+      "$numberLong": "4"
+    },
+    "itemName": "SSD Kingston NV2 500 ГБ",
+    "pros": [
+      "Швидкість",
+      "Гарантія 3 роки"
+    ],
+    "photos": [
+      "reviews/671-3/benchmark.png"
+    ],
+    "createdAt": {
+      "$date": "2026-10-25T11:15:00Z"
+    },
+    "version": 1
+  },
+  {
+    "_id": {
+      "$oid": "671000000000000000000004"
+    },
+    "reviewType": "item",
+    "rating": 2,
+    "text": "Через місяць на екрані з'явилася зелена смуга.",
+    "author": {
+      "customerId": {
+        "$numberLong": "4"
+      },
+      "displayName": "Тарас Мельник"
+    },
+    "catalogItemId": {
+      "$numberLong": "1"
+    },
+    "itemName": "Екран OLED для iPhone 13",
+    "cons": [
+      "Дефект матриці через місяць"
+    ],
+    "staffReply": {
+      "authorName": "Сервісний центр",
+      "text": "Це гарантійний випадок, замінимо безкоштовно.",
+      "repliedAt": {
+        "$date": "2026-11-06T09:00:00Z"
+      }
+    },
+    "discussionId": {
+      "$oid": "672000000000000000000002"
+    },
+    "createdAt": {
+      "$date": "2026-11-05T20:45:00Z"
+    },
+    "updatedAt": {
+      "$date": "2026-11-06T09:00:00Z"
+    },
+    "version": 2
+  },
+  {
+    "_id": {
+      "$oid": "671000000000000000000005"
+    },
+    "reviewType": "repair",
+    "rating": 4,
+    "title": "Чесно сказали, що ремонт недоцільний",
+    "text": "Матриця коштує майже як новий телевізор. Не нав'язували ремонт, узяли лише за діагностику.",
+    "author": {
+      "customerId": {
+        "$numberLong": "4"
+      },
+      "displayName": "Тарас Мельник"
+    },
+    "repairOrderId": {
+      "$numberLong": "5"
+    },
+    "device": {
+      "type": "TV",
+      "brand": "LG",
+      "model": "43UP7500"
+    },
+    "createdAt": {
+      "$date": "2026-10-14T10:00:00Z"
+    },
+    "version": 1
+  },
+  {
+    "_id": {
+      "$oid": "671000000000000000000006"
+    },
+    "reviewType": "item",
+    "rating": 5,
+    "text": "Тримає заряд як новий.",
+    "author": {
+      "customerId": {
+        "$numberLong": "3"
+      },
+      "displayName": "Марія Бондаренко"
+    },
+    "catalogItemId": {
+      "$numberLong": "3"
+    },
+    "itemName": "Акумулятор для Samsung Galaxy S22",
+    "createdAt": {
+      "$date": "2026-11-08T16:20:00Z"
+    },
+    "version": 1
+  },
+  {
+    "_id": {
+      "$oid": "671000000000000000000007"
+    },
+    "reviewType": "item",
+    "rating": 4,
+    "title": "Температура впала на 15 градусів",
+    "text": "Після чистки й заміни термопасти ноутбук перестав вимикатися.",
+    "author": {
+      "customerId": {
+        "$numberLong": "2"
+      },
+      "displayName": "Андрій Шевченко"
+    },
+    "catalogItemId": {
+      "$numberLong": "5"
+    },
+    "itemName": "Термопаста Arctic MX-4, 4 г",
+    "pros": [
+      "Помітний ефект",
+      "Невисока ціна"
+    ],
+    "createdAt": {
+      "$date": "2026-10-23T09:05:00Z"
+    },
+    "version": 1
+  }
+]
