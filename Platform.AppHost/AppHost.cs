@@ -23,4 +23,15 @@ builder.AddProject<Projects.Catalog_Api>("catalog-api")
     .WithReference(catalogDb)
     .WaitFor(catalogDb);
 
+var mongo = builder.AddMongoDB("mongo")
+    .WithImageTag("9.0")
+    .WithDataVolume();
+
+var reviewsDb = mongo.AddDatabase("reviews");
+
+builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
+    .WithEnvironment("MongoDb__ConnectionString", reviewsDb.Resource.ConnectionStringExpression)
+    .WithEnvironment("MongoDb__DatabaseName", reviewsDb.Resource.DatabaseName)
+    .WaitFor(reviewsDb);
+
 builder.Build().Run();
