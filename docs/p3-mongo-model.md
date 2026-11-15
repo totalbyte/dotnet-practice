@@ -66,6 +66,7 @@ erDiagram
 |--------|----------|-------|
 | `ix_reviews_catalogItemId_createdAt` (частковий, лише `item`) | `reviews` | відгуки про позицію каталогу, новіші спочатку, з пагінацією |
 | `ux_reviews_repairOrderId` (унікальний, частковий) | `reviews` | відгук за замовленням; гарантує один відгук на замовлення |
+| `ux_reviews_catalogItemId_customerId` (унікальний, частковий, лише `item`) | `reviews` | гарантує один відгук клієнта на позицію каталогу, зокрема при одночасних запитах |
 | `ix_reviews_author_createdAt` | `reviews` | «мої відгуки» — за полем вбудованого об'єкта `author.customerId` |
 | `ix_reviews_rating_createdAt` | `reviews` | найкращі / найгірші відгуки |
 | `ix_reviews_text` (текстовий) | `reviews` | повнотекстовий пошук у заголовку й тексті |
@@ -89,6 +90,11 @@ erDiagram
 `createdAt`, `updatedAt`, `isDeleted` (м'яке видалення) та `version` — токен оптимістичної
 конкурентності: оновлення виконується з фільтром `{ _id, version }` і `$inc: { version: 1 }`; якщо
 документ уже змінив хтось інший, `modifiedCount = 0` (сценарій 11 у `queries.js`).
+
+Ті самі індекси сервіс Reviews створює під час старту (`IndexCreationService`), а тестові відгуки
+вставляє, якщо колекція порожня (`ReviewSeeder`). Тому база, розгорнута скриптами, і база, яку
+сервіс наповнює сам (наприклад, в Aspire), однакові. Як сервіс читає й записує документи — у
+[`reviews-service.md`](reviews-service.md).
 
 ## Приклади документів
 
