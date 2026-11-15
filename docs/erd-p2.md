@@ -68,7 +68,8 @@ erDiagram
 | `CatalogItemDetail` | `CatalogItemDetails` | розширений опис, гарантія, характеристики |
 | `CatalogItemCategory` | `CatalogItemCategories` | проміжна сутність M:N з власними полями |
 
-Таблиця `SchemaVersions` — службова (облік ревізій схеми), сутністю домену не є.
+Службова таблиця `__EFMigrationsHistory` (перелік застосованих міграцій EF Core) сутністю домену не є.
+В еталонному скрипті `db/p2/schema.sql` ту саму роль виконує `SchemaVersions`.
 
 ## Типи зв'язків
 
@@ -101,11 +102,27 @@ erDiagram
 | `UX_CatalogItemCategories_CatalogItemId_Primary` | унікальний, фільтрований (`IsPrimary = 1`) | основна категорія позиції; гарантує, що вона одна |
 | `IX_Categories_ParentCategoryId_DisplayOrder` | покриваючий | підкатегорії в порядку показу (дерево меню) |
 
-## Готовність до змін (міграції)
+## Міграції
 
-- Імена таблиць, ключів (`FK_<Таблиця>_<Головна>_<Стовпець>`) та індексів відповідають угодам EF Core,
-  тож початкова міграція EF Core створить ту саму схему.
-- Усе відтворюється через Fluent API: `HasPrecision(18, 2)`, `HasCheckConstraint`, `HasIndex().HasFilter()`,
-  `IsRowVersion()`, `HasQueryFilter(x => !x.IsDeleted)`, `UsingEntity<CatalogItemCategory>()`.
-- До появи EF ревізії схеми фіксуються в `dbo.SchemaVersions`; після — в `__EFMigrationsHistory`.
-- Довідникові дані з `seed.sql` переносяться в `HasData`.
+Схему `CatalogDb` створюють міграції EF Core з моделі сервісу Catalog
+(`Services/Catalog/Catalog.Dal/Migrations`); `db/p2/schema.sql` лишається її еталонним описом.
+
+| Міграція | Вміст |
+|----------|-------|
+| `InitialCreate` | таблиці, ключі, `CHECK`-обмеження, індекси, довідники `Brands` і `Categories` (`HasData`) |
+| `AddAppRole` | роль `catalog_app` з правами на дані схеми `dbo` |
+
+- Імена таблиць, ключів (`FK_<Таблиця>_<Головна>_<Стовпець>`), обмежень та індексів у міграції ті самі,
+  що й в еталонному скрипті. Колонки, типи, `CHECK`, зовнішні ключі з правилами видалення, індекси з
+  фільтрами й включеними стовпцями збігаються повністю.
+- Усе описано через Fluent API в окремих класах `IEntityTypeConfiguration<T>`: `HasColumnType("decimal(18,2)")`,
+  `HasCheckConstraint`, `HasIndex().HasFilter().IncludeProperties()`, `IsRowVersion()`,
+  `HasQueryFilter(x => !x.IsDeleted)`, складений ключ проміжної сутності.
+- Відмінності від еталонного скрипта не впливають на поведінку: унікальність `Name`, `Slug`, `Sku`
+  забезпечують унікальні індекси з тими самими іменами `UQ_*` (у скрипті — обмеження `UNIQUE`);
+  обмеження `DEFAULT` мають автоматичні імена; замість `SchemaVersions` ревізії веде
+  `__EFMigrationsHistory`; подання `vw_CatalogItemCards` у міграції не перенесено — сервіс читає дані
+  запитами LINQ.
+- Довідники брендів і категорій наповнює `HasData` з тими самими Id, що й `seed.sql`; позиції 1..10,
+  їхні описи та зв'язки з категоріями додає `DbInitializer` після застосування міграцій.
+- Роль EF Core з моделі не генерує, тому її додано окремою міграцією через `migrationBuilder.Sql`.
