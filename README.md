@@ -3,8 +3,8 @@
 Платформа складається з трьох контекстів однієї предметної області, кожен із власною базою даних —
 дві реляційні (SQL Server) та одна документна (MongoDB). Сервіс **Repairs** реалізовано як
 тришаровий веб-API на ADO.NET і Dapper, сервіс **Catalog** — як тришаровий веб-API на
-Entity Framework Core (Code First, міграції). Обидва запускаються разом зі своїми базами однією
-командою через .NET Aspire.
+Entity Framework Core (Code First, міграції), сервіс **Reviews** — за Clean Architecture з CQRS
+(MediatR) на MongoDB. Усі три запускаються разом зі своїми базами однією командою через .NET Aspire.
 
 ## Зміст
 
@@ -15,12 +15,13 @@ Entity Framework Core (Code First, міграції). Обидва запуск�
 5. [Схема рішення](#схема-рішення)
 6. [API сервісу Repairs](#api-сервісу-repairs)
 7. [Сервіс Catalog](#сервіс-catalog)
-8. [ERD-діаграми](#erd-діаграми)
-9. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
-10. [Розгортання баз даних](#розгортання-баз-даних)
-11. [Перевірка після розгортання](#перевірка-після-розгортання)
-12. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
-13. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
+8. [Сервіс Reviews](#сервіс-reviews)
+9. [ERD-діаграми](#erd-діаграми)
+10. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
+11. [Розгортання баз даних](#розгортання-баз-даних)
+12. [Перевірка після розгортання](#перевірка-після-розгортання)
+13. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
+14. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
 
 ## Предметна область
 
@@ -39,7 +40,7 @@ Entity Framework Core (Code First, міграції). Обидва запуск�
 |--------|----------|-----------|------------|----------------------------------|
 | №1 | **Repairs** — ремонти | SQL Server, `RepairsDb` | ADO.NET + Dapper, збережувані процедури | `Customer`, `RepairOrder`, `RepairOrderDetails`, `RepairOrderItem`, `RepairOrderStatusHistory`, залишок на складі |
 | №2 | **Catalog** — каталог | SQL Server, `CatalogDb` | EF Core, Code First, Fluent API | `Brand`, `Category`, `CatalogItem`, `CatalogItemDetail`, `CatalogItemCategory` |
-| №3 | **Reviews** — відгуки | MongoDB, `reviews` | MongoDB Driver, CQRS | `Review` (з вбудованими коментарями), `Discussion`, `DiscussionMessage`, `ItemRatingSummary` |
+| №3 | **Reviews** — відгуки | MongoDB, `reviews` | MongoDB Driver, Clean Architecture, CQRS (MediatR) | `Review` (з вбудованими коментарями), `Discussion`, `DiscussionMessage`, `ItemRatingSummary` |
 
 Кожна сутність належить рівно одному контексту. Позиція каталогу (`CatalogItem`) потрібна всім
 трьом, але її власник — лише Catalog: Repairs тримає локальну копію для читання, Reviews —
@@ -70,7 +71,7 @@ flowchart LR
 ```text
 README.md                 опис домену, запуск, API, розгортання БД, таблиця дублювання, ERD
 Platform.slnx             рішення з усіма проєктами платформи
-Platform.AppHost/         оркестрація .NET Aspire: SQL Server, бази RepairsDb і CatalogDb, обидва сервіси
+Platform.AppHost/         оркестрація .NET Aspire: SQL Server, MongoDB, бази RepairsDb, CatalogDb, reviews і три сервіси
 Services/
 ├── Repairs/              сервіс контексту Repairs — ADO.NET + Dapper
 │   ├── Repairs.Api/      контролери, обробник помилок, Program.cs, appsettings.json
@@ -78,12 +79,18 @@ Services/
 │   ├── Repairs.Dal/      інтерфейси й реалізації репозиторіїв, Unit of Work
 │   ├── Repairs.Domain/   моделі, константи, доменні винятки
 │   └── Repairs.Tests/    модульні тести
-└── Catalog/              сервіс контексту Catalog — EF Core
-    ├── Catalog.Api/      контролери, обробник помилок, кореляція запитів, Program.cs, appsettings.json
-    ├── Catalog.Bll/      сервіси, DTO, профілі AutoMapper, специфікації, валідатори
-    ├── Catalog.Dal/      DbContext, Configurations/, Migrations/, репозиторії, Unit of Work, Seeding/
-    ├── Catalog.Domain/   сутності з бізнес-правилами, доменні винятки
-    └── Catalog.Tests/    модульні тести
+├── Catalog/              сервіс контексту Catalog — EF Core
+│   ├── Catalog.Api/      контролери, обробник помилок, кореляція запитів, Program.cs, appsettings.json
+│   ├── Catalog.Bll/      сервіси, DTO, профілі AutoMapper, специфікації, валідатори
+│   ├── Catalog.Dal/      DbContext, Configurations/, Migrations/, репозиторії, Unit of Work, Seeding/
+│   ├── Catalog.Domain/   сутності з бізнес-правилами, доменні винятки
+│   └── Catalog.Tests/    модульні тести
+└── Reviews/              сервіс контексту Reviews — Clean Architecture, CQRS, MongoDB
+    ├── Reviews.Domain/          сутності, value objects, доменні винятки, інтерфейс репозиторію
+    ├── Reviews.Application/     команди й запити MediatR, обробники, behaviors, валідатори, DTO, AutoMapper
+    ├── Reviews.Infrastructure/  Mongo-контекст, BSON-мапінг, репозиторій, запити читання, сідінг, індекси
+    ├── Reviews.WebApi/          контролери, обробник помилок, Program.cs, appsettings*.json
+    └── Reviews.Tests/           модульні тести
 docker-compose.yml        SQL Server 2025 + MongoDB 9.0 та автоматичний запуск скриптів
 .env.example              шаблон паролів (.env у git не потрапляє)
 global.json               версія .NET SDK
@@ -93,6 +100,7 @@ docs/
 ├── duplication-policy.md політика дублювання та логічні посилання між базами
 ├── repairs-service.md    сервіс Repairs: шари, транзакції, помилки, валідація
 ├── catalog-service.md    сервіс Catalog: модель, репозиторії, специфікації, валідація, журнал
+├── reviews-service.md    сервіс Reviews: шари, домен, CQRS, behaviors, MongoDB, помилки
 ├── erd-p1.md             ERD Проєкту №1: зв'язки, обмеження, індекси
 ├── erd-p2.md             ERD Проєкту №2: зв'язки, обмеження, індекси
 ├── p3-mongo-model.md     модель MongoDB: вбудовування, посилання, гібрид
@@ -123,17 +131,19 @@ db/
 dotnet run --project Platform.AppHost
 ```
 
-Команда піднімає контейнер SQL Server і запускає обидва API:
+Команда піднімає контейнери SQL Server і MongoDB та запускає три API:
 
 - базу `RepairsDb` створює сам AppHost зі скриптів `db/p1/schema.sql`, `procedures.sql`, `seed.sql`;
 - базу `CatalogDb` AppHost створює порожньою, а таблиці й початкові дані в ній з'являються під час
-  старту сервісу Catalog — він застосовує міграції EF Core (див. [Сервіс Catalog](#сервіс-catalog)).
+  старту сервісу Catalog — він застосовує міграції EF Core (див. [Сервіс Catalog](#сервіс-catalog));
+- у базі `reviews` сервіс Reviews під час старту сам створює індекси й вставляє тестові відгуки
+  (див. [Сервіс Reviews](#сервіс-reviews)).
 
 У консолі з'являється посилання на Aspire Dashboard; ресурси `sql`, `RepairsDb`, `CatalogDb`,
-`repairs-api` і `catalog-api` мають перейти в стан **Running**. Перший запуск триває довше:
-завантажується образ і стартує SQL Server.
+`mongo`, `reviews`, `repairs-api`, `catalog-api` і `reviews-api` мають перейти в стан **Running**.
+Перший запуск триває довше: завантажуються образи й стартують сервери баз.
 
-![Aspire Dashboard: ресурси sql, CatalogDb, RepairsDb, catalog-api і repairs-api у стані Running](docs/img/aspire-dashboard.png)
+![Aspire Dashboard: ресурси mongo, reviews, sql, CatalogDb, RepairsDb, catalog-api, repairs-api і reviews-api у стані Running](docs/img/aspire-dashboard.png)
 
 | Що | Адреса |
 |----|--------|
@@ -141,6 +151,8 @@ dotnet run --project Platform.AppHost
 | Repairs — API | `http://localhost:5077/api/...` |
 | Catalog — Swagger UI | `http://localhost:5078/swagger` |
 | Catalog — API | `http://localhost:5078/api/...` |
+| Reviews — Swagger UI | `http://localhost:5079/swagger` |
+| Reviews — API | `http://localhost:5079/api/reviews` |
 | Aspire Dashboard | посилання з консолі (`https://localhost:17028/login?t=...`) |
 
 ![Swagger UI з переліком ендпоінтів](docs/img/swagger.jpeg)
@@ -150,11 +162,23 @@ dotnet run --project Platform.AppHost
 `ConnectionStrings__RepairsDb` і `ConnectionStrings__CatalogDb` без змін у коді сервісів. Пароль
 SQL Server Aspire генерує сам і зберігає в секретах користувача.
 
-Дані зберігаються в томі Docker і переживають перезапуск; скрипти, міграції та початкове наповнення
+Ресурси AppHost відповідають проєктам так:
+
+| Ресурс | Проєкт | Порт |
+|--------|--------|------|
+| `repairs-api` | `Services/Repairs/Repairs.Api` | 5077 |
+| `catalog-api` | `Services/Catalog/Catalog.Api` | 5078 |
+| `reviews-api` | `Services/Reviews/Reviews.WebApi` | 5079 |
+
+Сервіс Reviews читає налаштування з розділу `MongoDb`, тому AppHost передає йому рядок підключення
+бази `reviews` змінними `MongoDb__ConnectionString` і `MongoDb__DatabaseName`. Пароль і TLS для
+контейнера MongoDB Aspire налаштовує сам.
+
+Дані зберігаються в томах Docker і переживають перезапуск; скрипти, міграції та початкове наповнення
 ідемпотентні, тож повторний старт нічого не дублює. Повернутися до початкових даних — зупинити AppHost і видалити том:
 
 ```bash
-docker volume ls --filter name=sql-data
+docker volume ls --filter name=platform.apphost
 ```
 
 ```bash
@@ -176,6 +200,13 @@ dotnet run --project Services/Catalog/Catalog.Api
 
 Сервіс Catalog під час старту сам створює `CatalogDb`, якщо її ще немає, і застосовує міграції.
 
+Сервіс Reviews з MongoDB з `docker compose` (пароль — `MONGO_ROOT_PASSWORD` з `.env`):
+
+```powershell
+$env:MongoDb__ConnectionString = "mongodb://root:<MONGO_PASSWORD>@127.0.0.1:27017/?authSource=admin&maxPoolSize=20&serverSelectionTimeoutMS=3000"
+dotnet run --project Services/Reviews/Reviews.WebApi
+```
+
 Модульні тести:
 
 ```bash
@@ -192,6 +223,9 @@ flowchart TB
     AppHost -->|створює порожню базу| CDb[("SQL Server<br/>CatalogDb")]
     AppHost -.->|ConnectionStrings__RepairsDb| Api
     AppHost -.->|ConnectionStrings__CatalogDb| CApi
+    AppHost -->|запускає| WApi
+    AppHost -->|запускає контейнер| MDb[("MongoDB<br/>reviews")]
+    AppHost -.->|MongoDb__ConnectionString| WApi
 
     subgraph Repairs["Services/Repairs"]
         Api["Repairs.Api<br/>контролери, ProblemDetails, Swagger"] --> Bll["Repairs.Bll<br/>сервіси, DTO, AutoMapper"]
@@ -207,8 +241,17 @@ flowchart TB
         CDal --> CDomain
     end
 
+    subgraph Reviews["Services/Reviews"]
+        WApi["Reviews.WebApi<br/>контролери, ProblemDetails, Serilog, Swagger"] --> App["Reviews.Application<br/>команди, запити, behaviors, валідатори"]
+        WApi -.->|реєстрація DI| Infra
+        Infra["Reviews.Infrastructure<br/>MongoDbContext, BsonClassMap, репозиторій, сідінг"] --> App
+        Infra --> WDomain["Reviews.Domain<br/>сутності, value objects"]
+        App --> WDomain
+    end
+
     Dal --> Db
     CDal -->|міграції, LINQ to Entities| CDb
+    Infra -->|MongoDB Driver| MDb
 ```
 
 - **Repairs.Api** — тонкі асинхронні контролери: приймають DTO, викликають сервіс, повертають статус.
@@ -231,6 +274,10 @@ flowchart TB
 - **Catalog.Dal** — `CatalogDbContext`, конфігурації Fluent API, міграції, узагальнений і три
   спеціалізовані репозиторії, `UnitOfWork` з єдиним `SaveChangesAsync`, початкове наповнення.
 - **Catalog.Domain** — сутності, які самі перевіряють свої правила, і доменні винятки.
+
+Сервіс Reviews побудовано інакше — за Clean Architecture: залежності спрямовані до домену, а
+доступ до бази — лише реалізація інтерфейсів, оголошених у внутрішніх шарах (див.
+[Сервіс Reviews](#сервіс-reviews)).
 
 ## API сервісу Repairs
 
@@ -548,6 +595,131 @@ curl "http://localhost:5078/api/categories/for-laptops/recent-items?since=2026-0
 
 ![Журнал SQL-запитів: один запит для eager loading і два для explicit loading](docs/img/catalog-sql-log.png)
 
+## Сервіс Reviews
+
+Сервіс контексту Reviews приймає відгуки клієнтів про ремонт і про позиції каталогу, коментарі до
+них і відповідь сервісного центру. Дані зберігаються в MongoDB (база `reviews`, колекція
+`reviews`) у структурі, описаній у [`docs/p3-mongo-model.md`](docs/p3-mongo-model.md). Докладно
+про шари, домен, CQRS, behaviors і мапінг — [`docs/reviews-service.md`](docs/reviews-service.md).
+
+![Swagger UI сервісу Reviews](docs/img/reviews-swagger.png)
+
+### Шари Clean Architecture
+
+```mermaid
+flowchart TB
+    WebApi["Reviews.WebApi<br/>ApiControllerBase, ReviewsController, ReviewCommentsController,<br/>GlobalExceptionHandler, Program.cs"]
+    Infrastructure["Reviews.Infrastructure<br/>MongoDbContext, MongoMappings (BsonClassMap),<br/>ReviewRepository, ReviewQueries, ReviewSeeder, IndexCreationService"]
+    Application["Reviews.Application<br/>Commands / Queries + обробники, валідатори,<br/>Behaviors, IReviewQueries, DTO, ReviewProfile"]
+    Domain["Reviews.Domain<br/>BaseEntity, ValueObject, Review, Comment,<br/>Author, Device, StaffReply, IReviewRepository"]
+
+    WebApi --> Application
+    WebApi -->|лише реєстрація DI| Infrastructure
+    Infrastructure --> Application
+    Infrastructure --> Domain
+    Application --> Domain
+    Infrastructure -->|MongoDB Driver| Db[("MongoDB<br/>reviews")]
+```
+
+Правило залежностей: внутрішній шар не знає про зовнішні. `Reviews.Domain` не посилається на жоден
+проєкт рішення і з пакетів має лише `MongoDB.Bson` (тип `ObjectId`) — без драйвера бази. Інтерфейси
+доступу до даних оголошено всередині (`IReviewRepository` у Domain, `IReviewQueries` в Application),
+реалізації — в Infrastructure. Кожен шар реєструє свої сервіси власним методом: `AddApplication`
+(MediatR, behaviors, валідатори) і `AddInfrastructure` (MongoDB, мапінг, репозиторій, сідінг,
+індекси, health check).
+
+Кожна операція API — команда або запит MediatR з окремим обробником. Запит проходить ланцюжок
+behaviors: `LoggingBehavior` → `ExceptionHandlingBehavior` → `ValidationBehavior` →
+`PerformanceBehavior` → обробник. Некоректні дані відхиляє `ValidationBehavior`, і обробник не
+викликається.
+
+### API сервісу Reviews
+
+| Метод | Шлях | Команда / запит | Успіх |
+|-------|------|-----------------|-------|
+| GET | `/api/reviews?catalogItemId=&repairOrderId=&customerId=&reviewType=&minRating=&search=&page=&pageSize=` | `GetReviewsListQuery` — фільтри, текстовий пошук, пагінація `$skip`/`$limit` | 200 |
+| GET | `/api/reviews/feed?catalogItemId=&customerId=&after=&limit=` | `GetReviewsFeedQuery` — курсорна пагінація | 200 |
+| GET | `/api/reviews/{id}` | `GetReviewByIdQuery`; версія в `ETag` | 200 |
+| POST | `/api/reviews` | `CreateReviewCommand` | 201 + `Location` |
+| PUT | `/api/reviews/{id}` + `If-Match` | `UpdateReviewCommand` | 200 + `ETag` |
+| DELETE | `/api/reviews/{id}` + `If-Match` | `DeleteReviewCommand` (м'яке видалення) | 204 |
+| PUT | `/api/reviews/{id}/staff-reply` | `ReplyToReviewCommand` | 200 |
+| GET | `/api/reviews/{reviewId}/comments` | `GetReviewCommentsQuery` | 200 |
+| POST | `/api/reviews/{reviewId}/comments` | `AddCommentCommand` | 201 |
+
+Помилки повертаються у форматі ProblemDetails: **400** — валідація (зокрема некоректний `ObjectId`)
+чи порушене доменне правило, **404** — відгук не знайдено, **409** — застаріла версія в `If-Match`
+або дубль, який зупинив унікальний індекс, **503** — MongoDB недоступна. Повна таблиця —
+[`docs/reviews-service.md`](docs/reviews-service.md#обробка-помилок).
+
+### Приклади запитів до Reviews
+
+Створити відгук про позицію каталогу — 201, у `Location` рядковий `ObjectId`:
+
+```bash
+curl -i -X POST http://localhost:5079/api/reviews -H "Content-Type: application/json" -d '{"reviewType":"item","customerId":3,"authorName":"Maria Bondarenko","rating":5,"title":"Like new","text":"Bright and sharp","catalogItemId":1,"itemName":"OLED screen for iPhone 13","pros":["Colors"]}'
+```
+
+```text
+HTTP/1.1 201 Created
+ETag: "1"
+Location: http://localhost:5079/api/reviews/6af9e49ba668924b117656cc
+
+{"id":"6af9e49ba668924b117656cc"}
+```
+
+Повторний відгук того самого клієнта на ту саму позицію — 400 від асинхронного правила валідатора:
+
+```json
+{"title":"One or more validation errors occurred.","status":400,"errors":{"CatalogItemId":["The customer has already reviewed this catalog item"]}}
+```
+
+Змінити відгук: передати версію з `ETag` у `If-Match`. Повтор зі старою версією — 409:
+
+```bash
+curl -i -X PUT http://localhost:5079/api/reviews/<id> -H "Content-Type: application/json" -H 'If-Match: "1"' -d '{"rating":4,"title":"Still good","text":"Bright, a bit pricey","pros":["Colors"],"cons":["Price"]}'
+```
+
+```json
+{"title":"Conflict","status":409,"detail":"Review 6af9e49ba668924b117656cc has version 2, but version 1 was expected"}
+```
+
+Відгуки про позицію 1 і повнотекстовий пошук:
+
+```bash
+curl "http://localhost:5079/api/reviews?catalogItemId=1&page=1&pageSize=5"
+```
+
+```bash
+curl "http://localhost:5079/api/reviews?search=екран"
+```
+
+Стрічка з курсором — наступна сторінка після останнього отриманого відгуку:
+
+```bash
+curl "http://localhost:5079/api/reviews/feed?limit=3&after=671000000000000000000005"
+```
+
+### Журнал і індекси
+
+Журнал веде Serilog: консоль і файл `logs/reviews-api-<дата>.log` (JSON). `LoggingBehavior` пише
+кожен запит MediatR і відповідь на нього, `PerformanceBehavior` — попередження про обробники,
+повільніші за 500 мс. Для команди з `rating: 10` у журналі є `Handling CreateReviewCommand` і
+попередження валідації, але немає `Handled` — обробник не виконувався:
+
+![Журнал: команда з оцінкою 10 відхилена до виклику обробника](docs/img/reviews-validation-log.png)
+
+Документи колекції `reviews` у MongoDB Compass — структура з [`docs/p3-mongo-model.md`](docs/p3-mongo-model.md):
+поля в camelCase, вкладені `author`, `comments`, `device`, `staffReply`, ідентифікатори інших
+контекстів типу `Long`, без службових полів .NET:
+
+![Документи колекції reviews у MongoDB Compass](docs/img/reviews-compass.png)
+
+Індекси колекції `reviews` сервіс створює сам під час старту (`IndexCreationService`), тестові
+відгуки — `ReviewSeeder`, якщо колекція порожня:
+
+![Результат db.reviews.getIndexes()](docs/img/reviews-indexes.png)
+
 ## ERD-діаграми
 
 ### Проєкт №1 — RepairsDb
@@ -729,6 +901,10 @@ docker exec sc-mongo mongosh --quiet -u root -p "<MONGO_PASSWORD>" --authenticat
 | Ідемпотентність міграцій і наповнення Catalog | перезапустити сервіс Catalog | у журналі немає жодного `INSERT`; у `CatalogDb` та сама кількість рядків |
 | Пагінація Catalog | `GET /api/catalog-items?page=2&pageSize=5` | 5 позицій, `totalCount` = 10, `totalPages` = 2 |
 | Унікальність SKU | `POST /api/catalog-items` з наявним SKU | 409 у форматі ProblemDetails |
+| Валідація Reviews до обробника | `POST /api/reviews` з `rating: 10` | 400; у журналі `Handling` і `failed validation, handler was not invoked`, без `Handled` |
+| Повторний відгук | другий `POST /api/reviews` того самого клієнта на ту саму позицію | 400 від валідатора; одночасні запити — 409 від унікального індексу |
+| Конфлікт версій | `PUT /api/reviews/{id}` із застарілим `If-Match` | 409 |
+| Індекси й сідінг Reviews | `db.reviews.getIndexes()`; перезапуск сервісу | 7 індексів (з `_id`); у журналі `seeding skipped`, 7 документів |
 
 Кількість записів після seed:
 

@@ -179,6 +179,12 @@ db.reviews.createIndex(
   { name: "ux_reviews_repairOrderId", unique: true, partialFilterExpression: { repairOrderId: { $exists: true } } }
 );
 
+// Правило: клієнт залишає один відгук на позицію каталогу; захищає від дублю при одночасних запитах.
+db.reviews.createIndex(
+  { catalogItemId: 1, "author.customerId": 1 },
+  { name: "ux_reviews_catalogItemId_customerId", unique: true, partialFilterExpression: { reviewType: "item" } }
+);
+
 // Запит: «мої відгуки» - усі відгуки клієнта, новіші спочатку (поле вбудованого об'єкта).
 db.reviews.createIndex({ "author.customerId": 1, createdAt: -1 }, { name: "ix_reviews_author_createdAt" });
 
