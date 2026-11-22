@@ -1,22 +1,18 @@
 using System.Diagnostics;
+using Platform.ServiceDefaults.Correlation;
 using Repairs.Api.ExceptionHandling;
 using Repairs.Bll.Interfaces;
 using Repairs.Bll.Mapping;
 using Repairs.Bll.Services;
 using Repairs.Dal;
 using Repairs.Dal.Interfaces;
-using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 var connectionString = builder.Configuration.GetConnectionString("RepairsDb")
     ?? throw new InvalidOperationException("Connection string 'RepairsDb' is missing");
-
-builder.Host.UseSerilog((context, configuration) => configuration
-    .ReadFrom.Configuration(context.Configuration)
-    .Enrich.FromLogContext()
-    .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {TraceId} {SourceContext}: {Message:lj}{NewLine}{Exception}"));
 
 builder.Services.AddScoped<IUnitOfWork>(_ => new UnitOfWork(connectionString));
 builder.Services.AddScoped<ICustomerService, CustomerService>();
@@ -43,7 +39,7 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-app.UseSerilogRequestLogging();
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -53,5 +49,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapDefaultEndpoints();
 
 app.Run();
