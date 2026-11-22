@@ -1,7 +1,7 @@
-/* Проєкт №3 - MongoDB reviews. Запити перевірки та aggregation pipeline; запускати після seed.js.
+/* Проєкт №3 - MongoDB ReviewsDb. Запити перевірки та aggregation pipeline; запускати після seed.js.
    Дані не змінюються: CRUD-сценарій працює з тимчасовим документом і видаляє його. */
 
-db = db.getSiblingDB("reviews");
+db = db.getSiblingDB("ReviewsDb");
 
 function section(title) {
   print("\n--- " + title + " ---");
