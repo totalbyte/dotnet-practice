@@ -21,7 +21,7 @@ Work; `CatalogDbContext` використовують тільки `Catalog.Dal`
 
 | Проєкт | Вміст |
 |--------|-------|
-| `Catalog.Api` | контролери, `GlobalExceptionHandler`, `CorrelationIdMiddleware`, `Program.cs`, `appsettings.json` |
+| `Catalog.Api` | контролери, `GlobalExceptionHandler`, `Program.cs`, `appsettings.json` |
 | `Catalog.Bll` | сервіси та їхні інтерфейси, DTO, профілі AutoMapper, специфікації, валідатори FluentValidation |
 | `Catalog.Dal` | `CatalogDbContext`, `Configurations/`, `Migrations/`, репозиторії, `UnitOfWork`, `Seeding/DbInitializer` |
 | `Catalog.Domain` | сутності з бізнес-правилами, `DomainException`, `EntityNotFoundException`, `ConflictException`, `ValidationException` |
@@ -135,13 +135,14 @@ FluentValidation до конвеєра MVC не використовується
 
 ## Журнал
 
-Serilog підключено як провайдера журналювання (`UseSerilog`), налаштування читаються з розділу
-`Serilog` конфігурації. `CorrelationIdMiddleware` бере ідентифікатор із заголовка
-`X-Correlation-ID` (або використовує ідентифікатор трасування), додає його до контексту журналу й
-повертає в заголовку відповіді та в тілі `ProblemDetails`. `UseSerilogRequestLogging` пише один
-запис на HTTP-запит із властивостями `RequestMethod`, `RequestPath`, `StatusCode`, `Elapsed`,
-`UserId`. Категорію `Microsoft.EntityFrameworkCore.Database.Command` піднято до рівня `Information`,
-тому в журналі видно кожну SQL-команду.
+Журнал, трасування й кореляцію запитів дає `Platform.ServiceDefaults` (див.
+[`platform.md`](platform.md)): `builder.AddServiceDefaults()` підключає Serilog і OpenTelemetry, а
+спільний `CorrelationIdMiddleware` бере ідентифікатор із заголовка `X-Correlation-Id` (або створює
+новий), додає його до контексту журналу й повертає в заголовку відповіді; `Program.cs` додає його ж
+у тіло `ProblemDetails`. Розділ `Serilog` в `appsettings.json` містить лише налаштування Catalog:
+файловий приймач і рівень `Information` для категорії `Microsoft.EntityFrameworkCore.Database.Command`,
+тому в журналі видно кожну SQL-команду. Бізнес-операції з позиціями (створення, зміна, зміна ціни)
+мають власні spans `ActivitySource` `Catalog.Bll`.
 
 ## Початкові дані
 

@@ -4,24 +4,27 @@
 дві реляційні (SQL Server) та одна документна (MongoDB). Сервіс **Repairs** реалізовано як
 тришаровий веб-API на ADO.NET і Dapper, сервіс **Catalog** — як тришаровий веб-API на
 Entity Framework Core (Code First, міграції), сервіс **Reviews** — за Clean Architecture з CQRS
-(MediatR) на MongoDB. Усі три запускаються разом зі своїми базами однією командою через .NET Aspire.
+(MediatR) на MongoDB. Усі три разом зі своїми базами, API-шлюзом на YARP і сервісом-агрегатором
+запускаються однією командою через .NET Aspire; логи й трасування всіх компонентів видно в Aspire
+Dashboard.
 
 ## Зміст
 
 1. [Предметна область](#предметна-область)
 2. [Три контексти та їхні сутності](#три-контексти-та-їхні-сутності)
 3. [Структура репозиторію](#структура-репозиторію)
-4. [Запуск сервісів через Aspire](#запуск-сервісів-через-aspire)
-5. [Схема рішення](#схема-рішення)
-6. [API сервісу Repairs](#api-сервісу-repairs)
-7. [Сервіс Catalog](#сервіс-catalog)
-8. [Сервіс Reviews](#сервіс-reviews)
-9. [ERD-діаграми](#erd-діаграми)
-10. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
-11. [Розгортання баз даних](#розгортання-баз-даних)
-12. [Перевірка після розгортання](#перевірка-після-розгортання)
-13. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
-14. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
+4. [Запуск платформи через Aspire](#запуск-платформи-через-aspire)
+5. [Gateway, Aggregator і спостережуваність](#gateway-aggregator-і-спостережуваність)
+6. [Схема рішення](#схема-рішення)
+7. [API сервісу Repairs](#api-сервісу-repairs)
+8. [Сервіс Catalog](#сервіс-catalog)
+9. [Сервіс Reviews](#сервіс-reviews)
+10. [ERD-діаграми](#erd-діаграми)
+11. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
+12. [Розгортання баз даних](#розгортання-баз-даних)
+13. [Перевірка після розгортання](#перевірка-після-розгортання)
+14. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
+15. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
 
 ## Предметна область
 
@@ -40,7 +43,7 @@ Entity Framework Core (Code First, міграції), сервіс **Reviews** �
 |--------|----------|-----------|------------|----------------------------------|
 | №1 | **Repairs** — ремонти | SQL Server, `RepairsDb` | ADO.NET + Dapper, збережувані процедури | `Customer`, `RepairOrder`, `RepairOrderDetails`, `RepairOrderItem`, `RepairOrderStatusHistory`, залишок на складі |
 | №2 | **Catalog** — каталог | SQL Server, `CatalogDb` | EF Core, Code First, Fluent API | `Brand`, `Category`, `CatalogItem`, `CatalogItemDetail`, `CatalogItemCategory` |
-| №3 | **Reviews** — відгуки | MongoDB, `reviews` | MongoDB Driver, Clean Architecture, CQRS (MediatR) | `Review` (з вбудованими коментарями), `Discussion`, `DiscussionMessage`, `ItemRatingSummary` |
+| №3 | **Reviews** — відгуки | MongoDB, `ReviewsDb` | MongoDB Driver, Clean Architecture, CQRS (MediatR) | `Review` (з вбудованими коментарями), `Discussion`, `DiscussionMessage`, `ItemRatingSummary` |
 
 Кожна сутність належить рівно одному контексту. Позиція каталогу (`CatalogItem`) потрібна всім
 трьом, але її власник — лише Catalog: Repairs тримає локальну копію для читання, Reviews —
@@ -55,7 +58,7 @@ flowchart LR
     subgraph P2["Проєкт №2 · Catalog · CatalogDb"]
         C[Brands<br/>Categories<br/>CatalogItems<br/>CatalogItemDetails<br/>CatalogItemCategories]
     end
-    subgraph P3["Проєкт №3 · Reviews · MongoDB reviews"]
+    subgraph P3["Проєкт №3 · Reviews · MongoDB ReviewsDb"]
         V[reviews<br/>discussions<br/>discussionMessages<br/>itemRatingSummaries]
     end
     C -. "CatalogItemId + копія Name, Price (без FK)" .-> R
@@ -71,23 +74,27 @@ flowchart LR
 ```text
 README.md                 опис домену, запуск, API, розгортання БД, таблиця дублювання, ERD
 Platform.slnx             рішення з усіма проєктами платформи
-Platform.AppHost/         оркестрація .NET Aspire: SQL Server, MongoDB, бази RepairsDb, CatalogDb, reviews і три сервіси
+Platform.AppHost/         оркестрація .NET Aspire (AppHost.cs): SQL Server, MongoDB, бази, сервіси, агрегатор і шлюз
+Platform.ServiceDefaults/ спільні налаштування (Extensions.cs): Serilog, OpenTelemetry, health checks, resilience, Correlation/
+Platform.ApiGateway/      API-шлюз на YARP: маршрути в appsettings.json, журнал і метрики трафіку (Logging/)
+Platform.Aggregator/      агрегатор: typed HttpClients (Clients/), картка замовлення (Services/, Dtos/), контролер
+Platform.Tests/           модульні тести агрегатора та CorrelationId
 Services/
 ├── Repairs/              сервіс контексту Repairs — ADO.NET + Dapper
 │   ├── Repairs.Api/      контролери, обробник помилок, Program.cs, appsettings.json
-│   ├── Repairs.Bll/      сервіси, DTO, профілі AutoMapper, валідація
+│   ├── Repairs.Bll/      сервіси, DTO, профілі AutoMapper, валідація, Diagnostics/
 │   ├── Repairs.Dal/      інтерфейси й реалізації репозиторіїв, Unit of Work
 │   ├── Repairs.Domain/   моделі, константи, доменні винятки
 │   └── Repairs.Tests/    модульні тести
 ├── Catalog/              сервіс контексту Catalog — EF Core
-│   ├── Catalog.Api/      контролери, обробник помилок, кореляція запитів, Program.cs, appsettings.json
-│   ├── Catalog.Bll/      сервіси, DTO, профілі AutoMapper, специфікації, валідатори
+│   ├── Catalog.Api/      контролери, обробник помилок, Program.cs, appsettings.json
+│   ├── Catalog.Bll/      сервіси, DTO, профілі AutoMapper, специфікації, валідатори, Diagnostics/
 │   ├── Catalog.Dal/      DbContext, Configurations/, Migrations/, репозиторії, Unit of Work, Seeding/
 │   ├── Catalog.Domain/   сутності з бізнес-правилами, доменні винятки
 │   └── Catalog.Tests/    модульні тести
 └── Reviews/              сервіс контексту Reviews — Clean Architecture, CQRS, MongoDB
     ├── Reviews.Domain/          сутності, value objects, доменні винятки, інтерфейс репозиторію
-    ├── Reviews.Application/     команди й запити MediatR, обробники, behaviors, валідатори, DTO, AutoMapper
+    ├── Reviews.Application/     команди й запити MediatR, обробники, behaviors, валідатори, DTO, AutoMapper, Diagnostics
     ├── Reviews.Infrastructure/  Mongo-контекст, BSON-мапінг, репозиторій, запити читання, сідінг, індекси
     ├── Reviews.WebApi/          контролери, обробник помилок, Program.cs, appsettings*.json
     └── Reviews.Tests/           модульні тести
@@ -101,11 +108,12 @@ docs/
 ├── repairs-service.md    сервіс Repairs: шари, транзакції, помилки, валідація
 ├── catalog-service.md    сервіс Catalog: модель, репозиторії, специфікації, валідація, журнал
 ├── reviews-service.md    сервіс Reviews: шари, домен, CQRS, behaviors, MongoDB, помилки
+├── platform.md           платформа: AppHost, ServiceDefaults, Gateway, Aggregator, CorrelationId, трасування
 ├── erd-p1.md             ERD Проєкту №1: зв'язки, обмеження, індекси
 ├── erd-p2.md             ERD Проєкту №2: зв'язки, обмеження, індекси
 ├── p3-mongo-model.md     модель MongoDB: вбудовування, посилання, гібрид
 ├── p3-documents/         приклади документів MongoDB у форматі JSON
-└── img/                  зображення ERD, знімки Swagger і Aspire Dashboard
+└── img/                  зображення ERD, знімки Swagger, Aspire Dashboard, trace і логів
 db/
 ├── p1/                   Проєкт №1 — RepairsDb
 │   ├── schema.sql        таблиці, ключі, обмеження, індекси, view, роль застосунку
@@ -116,51 +124,64 @@ db/
 │   ├── schema.sql        цільова схема: таблиці, ключі, обмеження, індекси, view
 │   ├── seed.sql          еталон початкових даних
 │   └── queries.sql       запити перевірки: зв'язки, пошук, обмеження
-└── p3/                   Проєкт №3 — MongoDB reviews
+└── p3/                   Проєкт №3 — MongoDB ReviewsDb
     ├── collections.js    колекції, JSON Schema-валідація, індекси
     ├── seed.js           тестові документи (ідемпотентно)
     └── queries.js        запити перевірки та aggregation pipeline
 ```
 
-## Запуск сервісів через Aspire
+## Запуск платформи через Aspire
 
 Потрібні [.NET SDK 10](https://dotnet.microsoft.com/download) і запущений
 [Docker](https://docs.docker.com/get-docker/). Файл `.env` для цього не потрібен.
+
+Пароль SQL Server — параметр-секрет AppHost `sql-password`. Його можна задати заздалегідь у секретах
+користувача (інакше Dashboard попросить ввести його під час першого запуску):
+
+```powershell
+dotnet user-secrets set "Parameters:sql-password" "<SA_PASSWORD>" --project Platform.AppHost
+```
+
+Необов'язково — ключ ліцензії Lucky Penny для AutoMapper і MediatR (без нього бібліотеки лише
+пишуть попередження в журнал):
+
+```powershell
+dotnet user-secrets set "Parameters:luckypenny-license-key" "<LICENSE_KEY>" --project Platform.AppHost
+```
+
+Запуск усієї платформи:
 
 ```bash
 dotnet run --project Platform.AppHost
 ```
 
-Команда піднімає контейнери SQL Server і MongoDB та запускає три API:
+Команда піднімає контейнери SQL Server і MongoDB, три сервіси, агрегатор і шлюз у порядку
+«бази → сервіси → агрегатор → шлюз»:
 
 - базу `RepairsDb` створює сам AppHost зі скриптів `db/p1/schema.sql`, `procedures.sql`, `seed.sql`;
 - базу `CatalogDb` AppHost створює порожньою, а таблиці й початкові дані в ній з'являються під час
   старту сервісу Catalog — він застосовує міграції EF Core (див. [Сервіс Catalog](#сервіс-catalog));
-- у базі `reviews` сервіс Reviews під час старту сам створює індекси й вставляє тестові відгуки
+- у базі `ReviewsDb` сервіс Reviews під час старту сам створює індекси й вставляє тестові відгуки
   (див. [Сервіс Reviews](#сервіс-reviews)).
 
-У консолі з'являється посилання на Aspire Dashboard; ресурси `sql`, `RepairsDb`, `CatalogDb`,
-`mongo`, `reviews`, `repairs-api`, `catalog-api` і `reviews-api` мають перейти в стан **Running**.
-Перший запуск триває довше: завантажуються образи й стартують сервери баз.
+У консолі з'являється посилання на Aspire Dashboard; усі десять ресурсів — `mongo`, `ReviewsDb`,
+`sql`, `CatalogDb`, `RepairsDb`, `repairs-api`, `catalog-api`, `reviews-api`, `aggregator` і
+`gateway` — мають перейти в стан **Running**. Перший запуск триває довше: завантажуються образи й
+стартують сервери баз.
 
-![Aspire Dashboard: ресурси mongo, reviews, sql, CatalogDb, RepairsDb, catalog-api, repairs-api і reviews-api у стані Running](docs/img/aspire-dashboard.png)
+![Aspire Dashboard: бази, три сервіси, aggregator і gateway у стані Running](docs/img/aspire-dashboard.png)
 
 | Що | Адреса |
 |----|--------|
+| **Gateway — єдина точка входу** | `http://localhost:5000/api/...` |
+| Aggregator — картка замовлення | `http://localhost:5000/api/aggregator/repair-orders/{id}/full` |
 | Repairs — Swagger UI | `http://localhost:5077/swagger` |
-| Repairs — API | `http://localhost:5077/api/...` |
 | Catalog — Swagger UI | `http://localhost:5078/swagger` |
-| Catalog — API | `http://localhost:5078/api/...` |
 | Reviews — Swagger UI | `http://localhost:5079/swagger` |
-| Reviews — API | `http://localhost:5079/api/reviews` |
+| Aggregator — Swagger UI | `http://localhost:5080/swagger` |
 | Aspire Dashboard | посилання з консолі (`https://localhost:17028/login?t=...`) |
 
 ![Swagger UI з переліком ендпоінтів](docs/img/swagger.jpeg)
-
-Ресурси баз в AppHost мають імена `RepairsDb` і `CatalogDb` — ті самі, що й рядки підключення в
-`appsettings.json` сервісів, тому Aspire передає їх в API змінними оточення
-`ConnectionStrings__RepairsDb` і `ConnectionStrings__CatalogDb` без змін у коді сервісів. Пароль
-SQL Server Aspire генерує сам і зберігає в секретах користувача.
 
 Ресурси AppHost відповідають проєктам так:
 
@@ -169,10 +190,14 @@ SQL Server Aspire генерує сам і зберігає в секретах 
 | `repairs-api` | `Services/Repairs/Repairs.Api` | 5077 |
 | `catalog-api` | `Services/Catalog/Catalog.Api` | 5078 |
 | `reviews-api` | `Services/Reviews/Reviews.WebApi` | 5079 |
+| `aggregator` | `Platform.Aggregator` | 5080 |
+| `gateway` | `Platform.ApiGateway` | 5000 |
 
-Сервіс Reviews читає налаштування з розділу `MongoDb`, тому AppHost передає йому рядок підключення
-бази `reviews` змінними `MongoDb__ConnectionString` і `MongoDb__DatabaseName`. Пароль і TLS для
-контейнера MongoDB Aspire налаштовує сам.
+Ресурси баз в AppHost мають імена `RepairsDb`, `CatalogDb` і `ReviewsDb` — ті самі, що й рядки
+підключення сервісів, тому Aspire передає їх змінними оточення `ConnectionStrings__RepairsDb`,
+`ConnectionStrings__CatalogDb` і `ConnectionStrings__ReviewsDb`. Пароль і TLS для контейнера MongoDB
+Aspire налаштовує сам. Ім'я ресурсу є й адресою для service discovery: шлюз і агрегатор звертаються
+до `http://repairs-api`, а не до `localhost:5077`.
 
 Дані зберігаються в томах Docker і переживають перезапуск; скрипти, міграції та початкове наповнення
 ідемпотентні, тож повторний старт нічого не дублює. Повернутися до початкових даних — зупинити AppHost і видалити том:
@@ -185,7 +210,7 @@ docker volume ls --filter name=platform.apphost
 docker volume rm <назва тому>
 ```
 
-Запустити API без Aspire, із SQL Server з `docker compose`, можна, перевизначивши рядок підключення
+Запустити API без Aspire, із базами з `docker compose`, можна, перевизначивши рядок підключення
 змінною оточення (PowerShell):
 
 ```powershell
@@ -203,7 +228,7 @@ dotnet run --project Services/Catalog/Catalog.Api
 Сервіс Reviews з MongoDB з `docker compose` (пароль — `MONGO_ROOT_PASSWORD` з `.env`):
 
 ```powershell
-$env:MongoDb__ConnectionString = "mongodb://root:<MONGO_PASSWORD>@127.0.0.1:27017/?authSource=admin&maxPoolSize=20&serverSelectionTimeoutMS=3000"
+$env:ConnectionStrings__ReviewsDb = "mongodb://root:<MONGO_PASSWORD>@127.0.0.1:27017/?authSource=admin&maxPoolSize=20&serverSelectionTimeoutMS=3000"
 dotnet run --project Services/Reviews/Reviews.WebApi
 ```
 
@@ -213,19 +238,96 @@ dotnet run --project Services/Reviews/Reviews.WebApi
 dotnet test Platform.slnx
 ```
 
+## Gateway, Aggregator і спостережуваність
+
+Клієнт звертається до всіх сервісів через шлюз на порту 5000. Шлюз маршрутизує запит за префіксом
+шляху, створює `X-Correlation-Id` (якщо клієнт не надіслав власний) і пише в журнал рішення про
+маршрутизацію. Докладно про маршрути, ServiceDefaults, CorrelationId і агрегатор —
+[`docs/platform.md`](docs/platform.md).
+
+| Префікс | Сервіс |
+|---------|--------|
+| `/api/repair-orders`, `/api/customers` | `repairs-api` |
+| `/api/repairs/catalog-items` | `repairs-api` (локальна копія позицій із залишком; шлюз перетворює шлях на `/api/catalog-items`) |
+| `/api/catalog-items`, `/api/categories`, `/api/brands` | `catalog-api` |
+| `/api/reviews` | `reviews-api` |
+| `/api/aggregator` | `aggregator` |
+
+Приклади запитів через шлюз (`-i` показує заголовок `X-Correlation-Id` у відповіді):
+
+```bash
+curl -i http://localhost:5000/api/repair-orders/1
+```
+
+```bash
+curl -i "http://localhost:5000/api/catalog-items?page=1&pageSize=5"
+```
+
+```bash
+curl -i "http://localhost:5000/api/reviews?catalogItemId=1"
+```
+
+```bash
+curl -i http://localhost:5000/api/repairs/catalog-items/1
+```
+
+Власний ідентифікатор кореляції клієнт передає заголовком — він повертається у відповіді й
+потрапляє в логи всіх сервісів ланцюжка:
+
+```bash
+curl -i -H "X-Correlation-Id: support-ticket-42" http://localhost:5000/api/customers/1
+```
+
+Картка ремонтного замовлення — агрегатор паралельно (`Task.WhenAll`) збирає замовлення з Repairs,
+актуальні дані позицій з Catalog і відгуки з Reviews:
+
+```bash
+curl -i http://localhost:5000/api/aggregator/repair-orders/1/full
+```
+
+Відповідь містить `order`, `parts` (знімок ціни із замовлення і вкладений блок `catalog` з поточною
+ціною й ознакою `priceChanged`), `reviews` і `warnings`. Якщо зупинити `reviews-api` у Dashboard,
+той самий запит повертає 200 із замовленням і позиціями, без відгуків, і з
+`"warnings": ["reviews-api is unavailable"]`. Неіснуюче замовлення — 404, недоступний `repairs-api`
+— 503 у форматі `ProblemDetails`.
+
+Усі застосунки підключають `Platform.ServiceDefaults`: Serilog пише JSON у консоль і передає кожен
+запис в OpenTelemetry, тож у вкладці *Structured logs* видно атрибути `ServiceName`, `CorrelationId`,
+`EnvironmentName`, `MachineName`, `ThreadId`, а також `TraceId` і `SpanId`. У вкладці *Traces* один
+запит до агрегатора — це один trace від шлюзу до SQL- і MongoDB-запитів:
+
+![Trace агрегувального запиту: gateway, aggregator, паралельні виклики catalog-api і reviews-api, SQL- і MongoDB-spans](docs/img/platform-trace.png)
+
+Фільтр *Structured logs* `CorrelationId contains <значення>` знаходить записи всіх сервісів одного
+звернення:
+
+![Structured logs, відфільтровані за одним CorrelationId](docs/img/platform-logs-correlation.png)
+
 ## Схема рішення
 
 ```mermaid
 flowchart TB
-    AppHost["Platform.AppHost<br/>.NET Aspire"] -->|запускає| Api
+    Client["Клієнт"] -->|":5000"| GW["Platform.ApiGateway<br/>YARP, CorrelationId, журнал маршрутизації"]
+    GW --> Agg["Platform.Aggregator<br/>typed HttpClients, Task.WhenAll"]
+    GW --> Api
+    GW --> CApi
+    GW --> WApi
+    Agg -.->|https+http://repairs-api| Api
+    Agg -.->|https+http://catalog-api| CApi
+    Agg -.->|https+http://reviews-api| WApi
+    SD["Platform.ServiceDefaults<br/>Serilog, OpenTelemetry, health, resilience"] -.->|підключають усі застосунки| GW
+
+    AppHost["Platform.AppHost<br/>.NET Aspire"] -->|запускає| GW
+    AppHost -->|запускає| Agg
+    AppHost -->|запускає| Api
     AppHost -->|запускає| CApi
+    AppHost -->|запускає| WApi
     AppHost -->|запускає контейнер,<br/>застосовує db/p1| Db[("SQL Server<br/>RepairsDb")]
     AppHost -->|створює порожню базу| CDb[("SQL Server<br/>CatalogDb")]
+    AppHost -->|запускає контейнер| MDb[("MongoDB<br/>ReviewsDb")]
     AppHost -.->|ConnectionStrings__RepairsDb| Api
     AppHost -.->|ConnectionStrings__CatalogDb| CApi
-    AppHost -->|запускає| WApi
-    AppHost -->|запускає контейнер| MDb[("MongoDB<br/>reviews")]
-    AppHost -.->|MongoDb__ConnectionString| WApi
+    AppHost -.->|ConnectionStrings__ReviewsDb| WApi
 
     subgraph Repairs["Services/Repairs"]
         Api["Repairs.Api<br/>контролери, ProblemDetails, Swagger"] --> Bll["Repairs.Bll<br/>сервіси, DTO, AutoMapper"]
@@ -235,14 +337,14 @@ flowchart TB
     end
 
     subgraph Catalog["Services/Catalog"]
-        CApi["Catalog.Api<br/>контролери, ProblemDetails, Serilog, Swagger"] --> CBll["Catalog.Bll<br/>сервіси, DTO, специфікації, валідатори"]
+        CApi["Catalog.Api<br/>контролери, ProblemDetails, Swagger"] --> CBll["Catalog.Bll<br/>сервіси, DTO, специфікації, валідатори"]
         CBll --> CDal["Catalog.Dal<br/>DbContext, міграції, репозиторії, Unit of Work"]
         CBll --> CDomain["Catalog.Domain<br/>сутності з правилами, винятки"]
         CDal --> CDomain
     end
 
     subgraph Reviews["Services/Reviews"]
-        WApi["Reviews.WebApi<br/>контролери, ProblemDetails, Serilog, Swagger"] --> App["Reviews.Application<br/>команди, запити, behaviors, валідатори"]
+        WApi["Reviews.WebApi<br/>контролери, ProblemDetails, Swagger"] --> App["Reviews.Application<br/>команди, запити, behaviors, валідатори"]
         WApi -.->|реєстрація DI| Infra
         Infra["Reviews.Infrastructure<br/>MongoDbContext, BsonClassMap, репозиторій, сідінг"] --> App
         Infra --> WDomain["Reviews.Domain<br/>сутності, value objects"]
@@ -267,8 +369,8 @@ flowchart TB
 
 Сервіс Catalog має таку саму будову шарів, але доступ до даних побудовано на EF Core:
 
-- **Catalog.Api** — асинхронні контролери, явний виклик валідаторів, глобальний обробник помилок,
-  журнал Serilog з ідентифікатором кореляції.
+- **Catalog.Api** — асинхронні контролери, явний виклик валідаторів, глобальний обробник помилок;
+  журнал і кореляцію запитів дає `Platform.ServiceDefaults`.
 - **Catalog.Bll** — сервіси, що працюють лише через Unit of Work; DTO, профілі AutoMapper,
   специфікації запитів і валідатори FluentValidation.
 - **Catalog.Dal** — `CatalogDbContext`, конфігурації Fluent API, міграції, узагальнений і три
@@ -532,7 +634,7 @@ SQL Server; `totalCount` рахує окремий `COUNT(*)` з тими сам
 **409** — конфлікт (SKU, назва бренду чи slug уже зайняті; бренд використовують позиції; порушено
 правило сутності, наприклад друга основна категорія), **500** — непередбачена помилка без технічних
 подробиць поза середовищем `Development`. Кожна відповідь містить `correlationId` — той самий, що
-в заголовку `X-Correlation-ID` і в журналі.
+в заголовку `X-Correlation-Id` і в журналі.
 
 ```json
 {
@@ -577,16 +679,16 @@ curl "http://localhost:5078/api/categories/for-laptops/recent-items?since=2026-0
 
 ### Журнал
 
-Журнал веде Serilog. Рівні й приймачі задаються в розділі `Serilog` файлу
-`Services/Catalog/Catalog.Api/appsettings.json` або змінними оточення (наприклад,
-`Serilog__MinimumLevel__Default=Warning`).
+Журнал веде Serilog, налаштований у `Platform.ServiceDefaults` однаково для всіх сервісів (див.
+[`docs/platform.md`](docs/platform.md)). У `Services/Catalog/Catalog.Api/appsettings.json` лишилося
+тільки те, що стосується саме Catalog: файловий приймач і рівень SQL-команд EF Core.
 
 | Що | Значення |
 |----|----------|
-| Приймачі | консоль (текст) і файл `logs/catalog-api-<дата>.log` (JSON, один запис на рядок, зберігається 7 днів) |
-| Рівні | типово `Information`; `Microsoft.AspNetCore`, `Microsoft.EntityFrameworkCore`, `System` — `Warning`; SQL-команди EF Core — `Information` |
-| Властивості | `CorrelationId` (із заголовка `X-Correlation-ID` або ідентифікатор трасування), `RequestPath`, `RequestMethod`, `StatusCode`, `Elapsed`, `UserId`, `Application` |
-| Запити HTTP | один запис на запит (`UseSerilogRequestLogging`) |
+| Приймачі | консоль (JSON, вкладка *Console logs* у Dashboard), OpenTelemetry (вкладка *Structured logs*) і файл `logs/catalog-api-<дата>.log` (JSON, один запис на рядок, зберігається 7 днів) |
+| Рівні | `Debug` у Development, `Information` в інших середовищах; `Microsoft.AspNetCore`, `Microsoft.EntityFrameworkCore` — `Warning`; SQL-команди EF Core — `Information` |
+| Властивості | `ServiceName`, `CorrelationId` (із заголовка `X-Correlation-Id` або новий GUID), `EnvironmentName`, `MachineName`, `ThreadId`, `TraceId`, `SpanId` |
+| Запити HTTP | `Request started` і `Request finished` зі статусом і тривалістю — для кожного запиту |
 | Помилки | один запис на виняток — у глобальному обробнику |
 
 У журналі видно різницю між способами завантаження пов'язаних даних: `GET /api/catalog-items/1`
@@ -598,7 +700,7 @@ curl "http://localhost:5078/api/categories/for-laptops/recent-items?since=2026-0
 ## Сервіс Reviews
 
 Сервіс контексту Reviews приймає відгуки клієнтів про ремонт і про позиції каталогу, коментарі до
-них і відповідь сервісного центру. Дані зберігаються в MongoDB (база `reviews`, колекція
+них і відповідь сервісного центру. Дані зберігаються в MongoDB (база `ReviewsDb`, колекція
 `reviews`) у структурі, описаній у [`docs/p3-mongo-model.md`](docs/p3-mongo-model.md). Докладно
 про шари, домен, CQRS, behaviors і мапінг — [`docs/reviews-service.md`](docs/reviews-service.md).
 
@@ -702,7 +804,8 @@ curl "http://localhost:5079/api/reviews/feed?limit=3&after=671000000000000000000
 
 ### Журнал і індекси
 
-Журнал веде Serilog: консоль і файл `logs/reviews-api-<дата>.log` (JSON). `LoggingBehavior` пише
+Журнал веде Serilog зі спільними налаштуваннями `Platform.ServiceDefaults`: консоль, *Structured logs*
+у Dashboard і файл `logs/reviews-api-<дата>.log` (JSON). `LoggingBehavior` пише
 кожен запит MediatR і відповідь на нього, `PerformanceBehavior` — попередження про обробники,
 повільніші за 500 мс. Для команди з `rating: 10` у журналі є `Handling CreateReviewCommand` і
 попередження валідації, але немає `Handled` — обробник не виконувався:
@@ -780,7 +883,7 @@ MongoDB, `sqlcmd` чи `mongosh` окремо не треба — усе є в �
 | Сервіс | Образ | Адреса з хоста |
 |--------|-------|----------------|
 | SQL Server (база `RepairsDb`; `CatalogDb` створює сервіс Catalog) | `mcr.microsoft.com/mssql/server:2025-latest` | `127.0.0.1,1433` |
-| MongoDB (база `reviews`) | `mongo:9.0` | `127.0.0.1:27017` |
+| MongoDB (база `ReviewsDb`) | `mongo:9.0` | `127.0.0.1:27017` |
 
 ### Крок 1. Задати паролі
 
@@ -834,7 +937,7 @@ docker exec sc-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "<S
 docker exec sc-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "<SA_PASSWORD>" -C -b -I -i /db/p1/procedures.sql
 docker exec sc-sqlserver /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "<SA_PASSWORD>" -C -b -I -i /db/p1/seed.sql
 
-# 3) Проєкт №3 — MongoDB reviews: колекції та індекси -> тестові документи
+# 3) Проєкт №3 — MongoDB ReviewsDb: колекції та індекси -> тестові документи
 docker exec sc-mongo mongosh --quiet -u root -p "<MONGO_PASSWORD>" --authenticationDatabase admin --file /db/p3/collections.js --file /db/p3/seed.js
 ```
 
@@ -912,7 +1015,7 @@ docker exec sc-mongo mongosh --quiet -u root -p "<MONGO_PASSWORD>" --authenticat
 |------|--------------------|---------|
 | `RepairsDb` | `Customers` / `CatalogItems` / `RepairOrders` / `RepairOrderDetails` / `RepairOrderItems` / `RepairOrderStatusHistory` | 4 / 10 / 5 / 5 / 8 / 18 |
 | `CatalogDb` | `Brands` / `Categories` / `CatalogItems` / `CatalogItemDetails` / `CatalogItemCategories` | 5 / 11 / 10 / 10 / 15 |
-| `reviews` | `reviews` / `discussions` / `discussionMessages` / `itemRatingSummaries` | 7 / 2 / 6 / 4 |
+| `ReviewsDb` | `reviews` / `discussions` / `discussionMessages` / `itemRatingSummaries` | 7 / 2 / 6 / 4 |
 
 Підключення графічними інструментами (SSMS, Azure Data Studio, MongoDB Compass): SQL Server —
 `127.0.0.1,1433`, логін `sa`; MongoDB — `mongodb://root:<MONGO_PASSWORD>@127.0.0.1:27017/?authSource=admin`.
