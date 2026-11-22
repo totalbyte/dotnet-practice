@@ -28,7 +28,7 @@ public sealed class HandlerTests
         var command = new CreateReviewCommand(
             ReviewType.Repair, 1, "Olena", 5, null, "Fixed", RepairOrderId: 9, Device: new DeviceDto("TV", "LG", "X"));
 
-        var id = await new CreateReviewCommandHandler(_reviews).Handle(command, CancellationToken.None);
+        var id = await new CreateReviewCommandHandler(_reviews, NullLogger<CreateReviewCommandHandler>.Instance).Handle(command, CancellationToken.None);
 
         Assert.True(ObjectId.TryParse(id, out _));
         await _reviews.Received(1).AddAsync(

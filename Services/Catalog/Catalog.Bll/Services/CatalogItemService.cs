@@ -1,4 +1,5 @@
 using AutoMapper;
+using Catalog.Bll.Diagnostics;
 using Catalog.Bll.Dtos;
 using Catalog.Bll.Dtos.CatalogItems;
 using Catalog.Bll.Interfaces;
@@ -31,6 +32,9 @@ public sealed class CatalogItemService(IUnitOfWork uow, IMapper mapper, ILogger<
 
     public async Task<CatalogItemDetailsDto> CreateAsync(CreateCatalogItemDto input, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.ActivitySource.StartActivity("CreateCatalogItem");
+        activity?.SetTag("catalog_item.sku", input.Sku);
+
         if (await uow.CatalogItems.ExistsBySkuAsync(input.Sku, ct))
             throw new ConflictException($"Catalog item with SKU '{input.Sku}' already exists");
         await EnsureBrandExistsAsync(input.BrandId, ct);
@@ -45,12 +49,17 @@ public sealed class CatalogItemService(IUnitOfWork uow, IMapper mapper, ILogger<
         await uow.CatalogItems.AddAsync(item, ct);
         await uow.SaveChangesAsync(ct);
 
-        logger.LogInformation("Catalog item {CatalogItemId} created with SKU {Sku}", item.Id, item.Sku);
+        activity?.SetTag("catalog_item.id", item.Id);
+        logger.LogInformation("Catalog item {CatalogItemId} created with SKU {Sku}, type {ItemType}, price {Price}",
+            item.Id, item.Sku, item.ItemType, item.Price);
         return mapper.Map<CatalogItemDetailsDto>(await FindWithDetailsAsync(item.Id, ct));
     }
 
     public async Task UpdateAsync(long id, UpdateCatalogItemDto input, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.ActivitySource.StartActivity("UpdateCatalogItem");
+        activity?.SetTag("catalog_item.id", id);
+
         var item = await FindWithDetailsAsync(id, ct);
         if (input.BrandId != item.BrandId)
             await EnsureBrandExistsAsync(input.BrandId, ct);
@@ -68,12 +77,15 @@ public sealed class CatalogItemService(IUnitOfWork uow, IMapper mapper, ILogger<
 
         await uow.SaveChangesAsync(ct);
 
-        logger.LogInformation("Catalog item {CatalogItemId} updated", id);
+        logger.LogInformation("Catalog item {CatalogItemId} updated, active {IsActive}", id, item.IsActive);
     }
 
     public async Task<CatalogItemDetailsDto> ChangePriceAsync(
         long id, ChangePriceDto input, CancellationToken ct = default)
     {
+        using var activity = CatalogTelemetry.ActivitySource.StartActivity("ChangeCatalogItemPrice");
+        activity?.SetTag("catalog_item.id", id);
+
         var item = await FindWithDetailsAsync(id, ct);
         var oldPrice = item.Price;
 
