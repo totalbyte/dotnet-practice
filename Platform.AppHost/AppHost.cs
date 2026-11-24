@@ -28,6 +28,13 @@ var mongo = builder.AddMongoDB("mongo")
 
 var reviewsDb = mongo.AddDatabase("ReviewsDb");
 
+// The resource name becomes ConnectionStrings:redis, which catalog-api (the cached reference data)
+// and the aggregator read with AddRedisDistributedCache("redis"); the volume keeps L2 across restarts.
+var redis = builder.AddRedis("redis")
+    .WithDataVolume();
+
+// Each service exposes REST on the "http" endpoint and gRPC on the HTTP/2-only "grpc" endpoint
+// declared in its Kestrel:Endpoints section; the aggregator resolves the latter as http://_grpc.<service>.
 var repairs = builder.AddProject<Projects.Repairs_Api>("repairs-api")
     .WithReference(repairsDb)
     .WaitFor(repairsDb)
@@ -37,6 +44,8 @@ var repairs = builder.AddProject<Projects.Repairs_Api>("repairs-api")
 var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
     .WithReference(catalogDb)
     .WaitFor(catalogDb)
+    .WithReference(redis)
+    .WaitFor(redis)
     .WithHttpHealthCheck("/health")
     .WithLicenseKey("AutoMapper__LicenseKey", licenseKey);
 
@@ -50,9 +59,11 @@ var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
     .WithReference(repairs)
     .WithReference(catalog)
     .WithReference(reviews)
+    .WithReference(redis)
     .WaitFor(repairs)
     .WaitFor(catalog)
     .WaitFor(reviews)
+    .WaitFor(redis)
     .WithHttpHealthCheck("/health");
 
 builder.AddProject<Projects.Platform_ApiGateway>("gateway")
