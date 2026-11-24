@@ -1,6 +1,7 @@
 using System.Data;
 using AutoMapper;
 using Microsoft.Extensions.Logging;
+using Repairs.Bll.Diagnostics;
 using Repairs.Bll.Dtos;
 using Repairs.Bll.Dtos.RepairOrders;
 using Repairs.Bll.Interfaces;
@@ -46,6 +47,10 @@ public sealed class RepairOrderService(IUnitOfWork uow, IMapper mapper, ILogger<
     {
         EnsureNoDuplicateItems(input.Items);
 
+        using var activity = RepairsTelemetry.ActivitySource.StartActivity("CreateRepairOrder");
+        activity?.SetTag("customer.id", input.CustomerId);
+        activity?.SetTag("repair_order.items_count", input.Items.Count);
+
         long orderId;
 
         await uow.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
@@ -80,15 +85,25 @@ public sealed class RepairOrderService(IUnitOfWork uow, IMapper mapper, ILogger<
             throw;
         }
 
-        logger.LogInformation(
-            "Repair order {RepairOrderId} created with {ItemsCount} items", orderId, input.Items.Count);
+        var created = await GetByIdAsync(orderId, ct);
 
-        return await GetByIdAsync(orderId, ct);
+        activity?.SetTag("repair_order.id", orderId);
+        activity?.SetTag("repair_order.status", created.Status);
+        logger.LogInformation(
+            "Repair order {RepairOrderId} created for customer {CustomerId} with {ItemsCount} items, amount {Amount}, status {Status}",
+            orderId, input.CustomerId, input.Items.Count, created.TotalAmount, created.Status);
+
+        return created;
     }
 
     public async Task<RepairOrderDto> AddItemAsync(
         long id, AddRepairOrderItemDto input, CancellationToken ct = default)
     {
+        using var activity = RepairsTelemetry.ActivitySource.StartActivity("AddRepairOrderItem");
+        activity?.SetTag("repair_order.id", id);
+        activity?.SetTag("catalog_item.id", input.CatalogItemId);
+        activity?.SetTag("catalog_item.quantity", input.Quantity);
+
         await uow.BeginTransactionAsync(IsolationLevel.ReadCommitted, ct);
         try
         {
@@ -114,13 +129,18 @@ public sealed class RepairOrderService(IUnitOfWork uow, IMapper mapper, ILogger<
         }
 
         logger.LogInformation(
-            "Catalog item {CatalogItemId} added to repair order {RepairOrderId}", input.CatalogItemId, id);
+            "Catalog item {CatalogItemId} x{Quantity} added to repair order {RepairOrderId}",
+            input.CatalogItemId, input.Quantity, id);
 
         return await GetByIdAsync(id, ct);
     }
 
     public async Task ChangeStatusAsync(long id, ChangeRepairOrderStatusDto input, CancellationToken ct = default)
     {
+        using var activity = RepairsTelemetry.ActivitySource.StartActivity("ChangeRepairOrderStatus");
+        activity?.SetTag("repair_order.id", id);
+        activity?.SetTag("repair_order.status", input.Status);
+
         var order = await uow.RepairOrders.GetByIdAsync(id, ct)
                     ?? throw new NotFoundException($"Repair order {id} not found");
 

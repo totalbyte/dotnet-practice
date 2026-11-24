@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using MongoDB.Driver;
+using MongoDB.Driver.Core.Extensions.DiagnosticSources;
 using Reviews.Domain.Entities;
 
 namespace Reviews.Infrastructure.Persistence;
@@ -13,7 +14,9 @@ public sealed class MongoDbContext : IDisposable
     public MongoDbContext(IOptions<MongoDbOptions> options)
     {
         var settings = options.Value;
-        _client = new MongoClient(settings.ConnectionString);
+        var clientSettings = MongoClientSettings.FromConnectionString(settings.ConnectionString);
+        clientSettings.ClusterConfigurator = cluster => cluster.Subscribe(new DiagnosticsActivityEventSubscriber());
+        _client = new MongoClient(clientSettings);
         Database = _client.GetDatabase(settings.DatabaseName);
     }
 

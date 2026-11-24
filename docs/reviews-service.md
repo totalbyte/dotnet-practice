@@ -1,7 +1,7 @@
 # Сервіс Reviews
 
 Веб-API контексту Reviews: відгуки клієнтів про ремонт і про позиції каталогу, коментарі до них і
-відповідь сервісного центру. Працює з документною базою MongoDB `reviews` (колекція `reviews`).
+відповідь сервісного центру. Працює з документною базою MongoDB `ReviewsDb` (колекція `reviews`).
 Сервіс побудовано за Clean Architecture: доменний шар у центрі, операції запису й читання розділено
 на команди та запити MediatR (CQRS), наскрізні перевірки винесено в pipeline behaviors.
 
@@ -22,9 +22,9 @@ flowchart LR
 | Проєкт | Посилається на | NuGet-пакети | Вміст |
 |--------|----------------|--------------|-------|
 | `Reviews.Domain` | — | `MongoDB.Bson` (лише тип `ObjectId`) | `BaseEntity`, `ValueObject`, сутності `Review` і `Comment`, value objects `Author`, `Device`, `StaffReply`, `DomainException`, `ConflictException`, `IReviewRepository` |
-| `Reviews.Application` | Domain | MediatR, FluentValidation, AutoMapper | `ICommand`, `ICommand<T>`, `IQuery<T>`; команди, запити, їхні обробники й валідатори; behaviors; `IReviewQueries`; DTO; `ReviewProfile`; `AddApplication` |
-| `Reviews.Infrastructure` | Application, Domain | `MongoDB.Driver`, `MongoDB.Bson`, `Microsoft.Extensions.Options.ConfigurationExtensions`, `AspNetCore.HealthChecks.MongoDb` | `MongoDbOptions`, `MongoDbContext`, `MongoMappings`, `ReviewRepository`, `ReviewQueries`, `IDataSeeder`, `ReviewSeeder`, `IndexCreationService`; `AddInfrastructure` |
-| `Reviews.WebApi` | Application, Infrastructure | Swashbuckle, Serilog.AspNetCore | `ApiControllerBase`, `ReviewsController`, `ReviewCommentsController`, `GlobalExceptionHandler`, `Program.cs`, `appsettings*.json` |
+| `Reviews.Application` | Domain | MediatR, FluentValidation, AutoMapper | `ICommand`, `ICommand<T>`, `IQuery<T>`; команди, запити, їхні обробники й валідатори; behaviors; `IReviewQueries`; DTO; `ReviewProfile`; `ReviewsTelemetry`; `AddApplication` |
+| `Reviews.Infrastructure` | Application, Domain | `MongoDB.Driver`, `MongoDB.Bson`, `MongoDB.Driver.Core.Extensions.DiagnosticSources`, `Microsoft.Extensions.Options.ConfigurationExtensions`, `AspNetCore.HealthChecks.MongoDb` | `MongoDbOptions`, `MongoDbContext`, `MongoMappings`, `ReviewRepository`, `ReviewQueries`, `IDataSeeder`, `ReviewSeeder`, `IndexCreationService`; `AddInfrastructure` |
+| `Reviews.WebApi` | Application, Infrastructure, `Platform.ServiceDefaults` | Swashbuckle | `ApiControllerBase`, `ReviewsController`, `ReviewCommentsController`, `GlobalExceptionHandler`, `Program.cs`, `appsettings*.json` |
 
 Домен не має драйвера MongoDB і не знає, як його зберігають: у класах немає BSON-атрибутів, мапінг
 описано окремо в `Reviews.Infrastructure`. На Infrastructure посилається лише `Program.cs` — щоб
@@ -212,13 +212,15 @@ flowchart LR
 | `appsettings.Staging.json` | хост `mongo`, пул 50, тайм-аути 5 с |
 | `appsettings.Production.json` | хост `mongo`, пул 5–100, тайм-аути 5 с, `retryWrites=true` |
 
-Назва бази — `MongoDb:DatabaseName` (`reviews`). Облікові дані в репозиторій не потрапляють: рядок
-підключення з паролем передається змінною `MongoDb__ConnectionString`; в Aspire це робить AppHost.
-Стан підключення показує `GET /health` (перевірка `mongodb`).
+Назва бази — `MongoDb:DatabaseName` (`ReviewsDb`). Облікові дані в репозиторій не потрапляють: рядок
+підключення з паролем передається змінною `ConnectionStrings__ReviewsDb` — в Aspire це робить
+AppHost через `WithReference`; якщо такого рядка немає, використовується резервний
+`MongoDb:ConnectionString`. Драйвер підписано на трасування (`DiagnosticsActivityEventSubscriber`),
+тож кожна команда MongoDB — окремий span. Стан підключення показує `GET /health` (перевірка `mongodb`).
 
 Ключ ліцензії MediatR і AutoMapper (Lucky Penny Software) читається з `LuckyPenny:LicenseKey`
-(user-secrets або змінна `LuckyPenny__LicenseKey`). Без ключа обидві бібліотеки працюють і лише
-пишуть попередження в журнал.
+(user-secrets або змінна `LuckyPenny__LicenseKey`; в Aspire її задає AppHost із параметра-секрету
+`luckypenny-license-key`). Без ключа обидві бібліотеки працюють і лише пишуть попередження в журнал.
 
 ## Тести
 

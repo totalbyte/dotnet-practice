@@ -1,27 +1,25 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Platform.ServiceDefaults.Correlation;
 using Reviews.Application;
 using Reviews.Application.Common.Mappings;
 using Reviews.Infrastructure;
+using Reviews.Infrastructure.Persistence;
 using Reviews.WebApi.ExceptionHandling;
-using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Host.UseSerilog((context, configuration) => configuration
-    .ReadFrom.Configuration(context.Configuration)
-    .Enrich.FromLogContext()
-    .Enrich.WithProperty("Application", "Reviews.WebApi")
-    .Destructure.ToMaximumDepth(6)
-    .Destructure.ToMaximumCollectionCount(10)
-    .Destructure.ToMaximumStringLength(200)
-    .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {SourceContext}: {Message:lj}{NewLine}{Exception}"));
+builder.AddServiceDefaults();
+
+var connectionString = builder.Configuration.GetConnectionString("ReviewsDb");
 
 builder.Services
     .AddApplication(builder.Configuration)
     .AddInfrastructure(builder.Configuration);
+
+if (!string.IsNullOrWhiteSpace(connectionString))
+    builder.Services.PostConfigure<MongoDbOptions>(options => options.ConnectionString = connectionString);
 
 builder.Services.AddAutoMapper(cfg =>
 {
@@ -43,7 +41,7 @@ builder.Services.AddSwaggerGen();
 
 var app = builder.Build();
 
-app.UseSerilogRequestLogging();
+app.UseMiddleware<CorrelationIdMiddleware>();
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -53,6 +51,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
-app.MapHealthChecks("/health");
+app.MapDefaultEndpoints();
 
 app.Run();

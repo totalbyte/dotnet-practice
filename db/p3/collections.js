@@ -1,8 +1,8 @@
-/* Проєкт №3 - контекст Reviews, MongoDB, база reviews. Колекції, JSON Schema-валідація, індекси.
+/* Проєкт №3 - контекст Reviews, MongoDB, база ReviewsDb. Колекції, JSON Schema-валідація, індекси.
    Скрипт ідемпотентний. catalogItemId, repairOrderId, customerId - ідентифікатори з інших контекстів:
    звичайні поля без зв'язків на рівні бази. */
 
-db = db.getSiblingDB("reviews");
+db = db.getSiblingDB("ReviewsDb");
 
 function ensureCollection(name, jsonSchema) {
   const options = { validator: { $jsonSchema: jsonSchema }, validationLevel: "strict", validationAction: "error" };

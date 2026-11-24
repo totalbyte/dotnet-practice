@@ -1,6 +1,5 @@
 using System.Text.Json.Serialization;
 using Catalog.Api.ExceptionHandling;
-using Catalog.Api.Middleware;
 using Catalog.Bll.Interfaces;
 using Catalog.Bll.Mapping;
 using Catalog.Bll.Services;
@@ -10,21 +9,14 @@ using Catalog.Dal.Interfaces;
 using Catalog.Dal.Seeding;
 using FluentValidation;
 using Microsoft.EntityFrameworkCore;
-using Serilog;
-using Serilog.Events;
+using Platform.ServiceDefaults.Correlation;
 
 var builder = WebApplication.CreateBuilder(args);
 
+builder.AddServiceDefaults();
+
 var connectionString = builder.Configuration.GetConnectionString("CatalogDb")
     ?? throw new InvalidOperationException("Connection string 'CatalogDb' is missing");
-
-builder.Host.UseSerilog((context, configuration) => configuration
-    .ReadFrom.Configuration(context.Configuration)
-    .MinimumLevel.Override("Microsoft.EntityFrameworkCore.Database.Command", LogEventLevel.Information)
-    .Enrich.FromLogContext()
-    .Enrich.WithProperty("Application", "Catalog.Api")
-    .WriteTo.Console(
-        outputTemplate: "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {SourceContext}: {Message:lj}{NewLine}{Exception}"));
 
 builder.Services.AddDbContext<CatalogDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -64,8 +56,6 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.UseMiddleware<CorrelationIdMiddleware>();
-app.UseSerilogRequestLogging(options => options.EnrichDiagnosticContext = (diagnostics, http) =>
-    diagnostics.Set("UserId", http.User.Identity?.Name ?? "anonymous"));
 app.UseExceptionHandler();
 
 if (app.Environment.IsDevelopment())
@@ -75,5 +65,6 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapDefaultEndpoints();
 
 app.Run();

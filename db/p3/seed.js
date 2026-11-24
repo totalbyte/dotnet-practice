@@ -1,7 +1,7 @@
-/* Проєкт №3 - MongoDB reviews. Тестові документи; запускати після collections.js.
+/* Проєкт №3 - MongoDB ReviewsDb. Тестові документи; запускати після collections.js.
    Ідемпотентно: фіксовані _id та upsert із $setOnInsert - наявні документи не дублюються. */
 
-db = db.getSiblingDB("reviews");
+db = db.getSiblingDB("ReviewsDb");
 
 function upsertAll(collectionName, documents) {
   const operations = documents.map(function (doc) {
