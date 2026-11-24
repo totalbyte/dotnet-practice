@@ -56,14 +56,10 @@ var reviews = builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
     .WithLicenseKey("LuckyPenny__LicenseKey", licenseKey);
 
 var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
-    .WithReference(repairs)
-    .WithReference(catalog)
-    .WithReference(reviews)
-    .WithReference(redis)
-    .WaitFor(repairs)
-    .WaitFor(catalog)
-    .WaitFor(reviews)
-    .WaitFor(redis)
+    .WithReference(repairs).WaitFor(repairs)
+    .WithReference(catalog).WaitFor(catalog)
+    .WithReference(reviews).WaitFor(reviews)
+    .WithReference(redis).WaitFor(redis)
     .WithHttpHealthCheck("/health");
 
 builder.AddProject<Projects.Platform_ApiGateway>("gateway")
