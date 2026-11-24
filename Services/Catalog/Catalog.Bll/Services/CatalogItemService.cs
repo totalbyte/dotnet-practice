@@ -30,6 +30,16 @@ public sealed class CatalogItemService(IUnitOfWork uow, IMapper mapper, ILogger<
     public async Task<CatalogItemDetailsDto> GetByIdAsync(long id, CancellationToken ct = default)
         => mapper.Map<CatalogItemDetailsDto>(await FindWithDetailsAsync(id, ct));
 
+    public async Task<IReadOnlyList<CatalogItemDetailsDto>> GetByIdsAsync(
+        IReadOnlyCollection<long> ids, CancellationToken ct = default)
+    {
+        if (ids.Count == 0)
+            return [];
+
+        var items = await uow.CatalogItems.ListAsync(new CatalogItemsByIdsSpec(ids), ct);
+        return mapper.Map<List<CatalogItemDetailsDto>>(items);
+    }
+
     public async Task<CatalogItemDetailsDto> CreateAsync(CreateCatalogItemDto input, CancellationToken ct = default)
     {
         using var activity = CatalogTelemetry.ActivitySource.StartActivity("CreateCatalogItem");

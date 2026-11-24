@@ -1,8 +1,7 @@
 using System.Text.Json.Serialization;
 using Catalog.Api.ExceptionHandling;
-using Catalog.Bll.Interfaces;
+using Catalog.Bll.Caching;
 using Catalog.Bll.Mapping;
-using Catalog.Bll.Services;
 using Catalog.Bll.Validation;
 using Catalog.Dal;
 using Catalog.Dal.Interfaces;
@@ -20,9 +19,20 @@ var connectionString = builder.Configuration.GetConnectionString("CatalogDb")
 
 builder.Services.AddDbContext<CatalogDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
-builder.Services.AddScoped<ICatalogItemService, CatalogItemService>();
-builder.Services.AddScoped<ICategoryService, CategoryService>();
-builder.Services.AddScoped<IBrandService, BrandService>();
+
+var cacheOptions = builder.Configuration.GetSection(CatalogCacheOptions.SectionName).Get<CatalogCacheOptions>()
+    ?? new CatalogCacheOptions();
+
+builder.Services.AddMemoryCache(options =>
+{
+    options.SizeLimit = cacheOptions.MemorySizeLimitKilobytes;
+    options.CompactionPercentage = 0.25;
+    options.ExpirationScanFrequency = TimeSpan.FromSeconds(30);
+    options.TrackStatistics = true;
+});
+builder.AddRedisDistributedCache("redis");
+builder.Services.AddCatalogServicesWithCaching(builder.Configuration);
+builder.Services.AddHealthChecks().AddCheck<CacheStatisticsHealthCheck>("cache");
 
 builder.Services.AddAutoMapper(cfg =>
 {

@@ -20,6 +20,7 @@ public static class Extensions
 {
     public const string HealthEndpointPath = "/health";
     public const string AlivenessEndpointPath = "/alive";
+    public const string CacheMeterSuffix = ".Cache";
 
     private const string ResilienceSection = "HttpClientResilience";
     private const string MongoDbActivitySource = "MongoDB.Driver.Core.Extensions.DiagnosticSources";
@@ -83,7 +84,11 @@ public static class Extensions
     public static TBuilder ConfigureOpenTelemetry<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         var applicationName = builder.Environment.ApplicationName;
-        var serviceSources = applicationName.Split('.')[0] + ".*";
+        var servicePrefix = applicationName.Split('.')[0];
+        var serviceSources = servicePrefix + ".*";
+        // Cache meters follow the "<Service>.Cache" convention: Catalog.Cache in catalog-api and Platform.Cache
+        // in the aggregator; they publish cache.hits / cache.misses tagged by cache.level (L1 / L2).
+        var cacheMeter = servicePrefix + CacheMeterSuffix;
         var sampler = builder.Environment.IsDevelopment()
             ? (Sampler)new AlwaysOnSampler()
             : new ParentBasedSampler(new TraceIdRatioBasedSampler(
@@ -102,6 +107,7 @@ public static class Extensions
             ]))
             .WithMetrics(metrics => metrics
                 .AddMeter(applicationName)
+                .AddMeter(cacheMeter)
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation())
