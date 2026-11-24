@@ -4,9 +4,10 @@
 дві реляційні (SQL Server) та одна документна (MongoDB). Сервіс **Repairs** реалізовано як
 тришаровий веб-API на ADO.NET і Dapper, сервіс **Catalog** — як тришаровий веб-API на
 Entity Framework Core (Code First, міграції), сервіс **Reviews** — за Clean Architecture з CQRS
-(MediatR) на MongoDB. Усі три разом зі своїми базами, API-шлюзом на YARP і сервісом-агрегатором
-запускаються однією командою через .NET Aspire; логи й трасування всіх компонентів видно в Aspire
-Dashboard.
+(MediatR) на MongoDB. Усі три разом зі своїми базами, Redis, API-шлюзом на YARP і сервісом-агрегатором
+запускаються однією командою через .NET Aspire; логи, трасування й метрики всіх компонентів видно в
+Aspire Dashboard. Зовнішні клієнти працюють із REST через шлюз, а агрегатор звертається до сервісів
+через gRPC. Довідникові дані Catalog кешуються у два рівні: у пам'яті процесу та в Redis.
 
 ## Зміст
 
@@ -15,16 +16,17 @@ Dashboard.
 3. [Структура репозиторію](#структура-репозиторію)
 4. [Запуск платформи через Aspire](#запуск-платформи-через-aspire)
 5. [Gateway, Aggregator і спостережуваність](#gateway-aggregator-і-спостережуваність)
-6. [Схема рішення](#схема-рішення)
-7. [API сервісу Repairs](#api-сервісу-repairs)
-8. [Сервіс Catalog](#сервіс-catalog)
-9. [Сервіс Reviews](#сервіс-reviews)
-10. [ERD-діаграми](#erd-діаграми)
-11. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
-12. [Розгортання баз даних](#розгортання-баз-даних)
-13. [Перевірка після розгортання](#перевірка-після-розгортання)
-14. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
-15. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
+6. [gRPC і кешування](#grpc-і-кешування)
+7. [Схема рішення](#схема-рішення)
+8. [API сервісу Repairs](#api-сервісу-repairs)
+9. [Сервіс Catalog](#сервіс-catalog)
+10. [Сервіс Reviews](#сервіс-reviews)
+11. [ERD-діаграми](#erd-діаграми)
+12. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
+13. [Розгортання баз даних](#розгортання-баз-даних)
+14. [Перевірка після розгортання](#перевірка-після-розгортання)
+15. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
+16. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
 
 ## Предметна область
 
@@ -74,21 +76,21 @@ flowchart LR
 ```text
 README.md                 опис домену, запуск, API, розгортання БД, таблиця дублювання, ERD
 Platform.slnx             рішення з усіма проєктами платформи
-Platform.AppHost/         оркестрація .NET Aspire (AppHost.cs): SQL Server, MongoDB, бази, сервіси, агрегатор і шлюз
-Platform.ServiceDefaults/ спільні налаштування (Extensions.cs): Serilog, OpenTelemetry, health checks, resilience, Correlation/
+Platform.AppHost/         оркестрація .NET Aspire (AppHost.cs): SQL Server, MongoDB, Redis, бази, сервіси, агрегатор і шлюз
+Platform.ServiceDefaults/ спільні налаштування (Extensions.cs): Serilog, OpenTelemetry, health checks, resilience, Correlation/, Grpc/ (interceptor)
 Platform.ApiGateway/      API-шлюз на YARP: маршрути в appsettings.json, журнал і метрики трафіку (Logging/)
-Platform.Aggregator/      агрегатор: typed HttpClients (Clients/), картка замовлення (Services/, Dtos/), контролер
-Platform.Tests/           модульні тести агрегатора та CorrelationId
+Platform.Aggregator/      агрегатор: gRPC-клієнти (Clients/), кеш картки в Redis (Caching/), картка замовлення (Services/, Dtos/), контролер
+Platform.Tests/           модульні тести агрегатора, gRPC-interceptor і CorrelationId
 Services/
 ├── Repairs/              сервіс контексту Repairs — ADO.NET + Dapper
-│   ├── Repairs.Api/      контролери, обробник помилок, Program.cs, appsettings.json
+│   ├── Repairs.Api/      контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), обробник помилок, Program.cs
 │   ├── Repairs.Bll/      сервіси, DTO, профілі AutoMapper, валідація, Diagnostics/
 │   ├── Repairs.Dal/      інтерфейси й реалізації репозиторіїв, Unit of Work
 │   ├── Repairs.Domain/   моделі, константи, доменні винятки
 │   └── Repairs.Tests/    модульні тести
 ├── Catalog/              сервіс контексту Catalog — EF Core
-│   ├── Catalog.Api/      контролери, обробник помилок, Program.cs, appsettings.json
-│   ├── Catalog.Bll/      сервіси, DTO, профілі AutoMapper, специфікації, валідатори, Diagnostics/
+│   ├── Catalog.Api/      контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), обробник помилок, Program.cs
+│   ├── Catalog.Bll/      сервіси, Caching/ (кеш L1 + L2), DTO, профілі AutoMapper, специфікації, валідатори, Diagnostics/
 │   ├── Catalog.Dal/      DbContext, Configurations/, Migrations/, репозиторії, Unit of Work, Seeding/
 │   ├── Catalog.Domain/   сутності з бізнес-правилами, доменні винятки
 │   └── Catalog.Tests/    модульні тести
@@ -96,7 +98,7 @@ Services/
     ├── Reviews.Domain/          сутності, value objects, доменні винятки, інтерфейс репозиторію
     ├── Reviews.Application/     команди й запити MediatR, обробники, behaviors, валідатори, DTO, AutoMapper, Diagnostics
     ├── Reviews.Infrastructure/  Mongo-контекст, BSON-мапінг, репозиторій, запити читання, сідінг, індекси
-    ├── Reviews.WebApi/          контролери, обробник помилок, Program.cs, appsettings*.json
+    ├── Reviews.WebApi/          контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), обробник помилок, Program.cs
     └── Reviews.Tests/           модульні тести
 docker-compose.yml        SQL Server 2025 + MongoDB 9.0 та автоматичний запуск скриптів
 .env.example              шаблон паролів (.env у git не потрапляє)
@@ -106,9 +108,9 @@ docs/
 ├── contexts.md           предметна область, контексти, сутності, агрегати
 ├── duplication-policy.md політика дублювання та логічні посилання між базами
 ├── repairs-service.md    сервіс Repairs: шари, транзакції, помилки, валідація
-├── catalog-service.md    сервіс Catalog: модель, репозиторії, специфікації, валідація, журнал
+├── catalog-service.md    сервіс Catalog: модель, репозиторії, специфікації, валідація, кешування, журнал
 ├── reviews-service.md    сервіс Reviews: шари, домен, CQRS, behaviors, MongoDB, помилки
-├── platform.md           платформа: AppHost, ServiceDefaults, Gateway, Aggregator, CorrelationId, трасування
+├── platform.md           платформа: AppHost, ServiceDefaults, Gateway, gRPC, Aggregator, CorrelationId, HTTP проти gRPC
 ├── erd-p1.md             ERD Проєкту №1: зв'язки, обмеження, індекси
 ├── erd-p2.md             ERD Проєкту №2: зв'язки, обмеження, індекси
 ├── p3-mongo-model.md     модель MongoDB: вбудовування, посилання, гібрид
@@ -155,8 +157,8 @@ dotnet user-secrets set "Parameters:luckypenny-license-key" "<LICENSE_KEY>" --pr
 dotnet run --project Platform.AppHost
 ```
 
-Команда піднімає контейнери SQL Server і MongoDB, три сервіси, агрегатор і шлюз у порядку
-«бази → сервіси → агрегатор → шлюз»:
+Команда піднімає контейнери SQL Server, MongoDB і Redis, три сервіси, агрегатор і шлюз у порядку
+«бази й Redis → сервіси → агрегатор → шлюз»:
 
 - базу `RepairsDb` створює сам AppHost зі скриптів `db/p1/schema.sql`, `procedures.sql`, `seed.sql`;
 - базу `CatalogDb` AppHost створює порожньою, а таблиці й початкові дані в ній з'являються під час
@@ -164,12 +166,12 @@ dotnet run --project Platform.AppHost
 - у базі `ReviewsDb` сервіс Reviews під час старту сам створює індекси й вставляє тестові відгуки
   (див. [Сервіс Reviews](#сервіс-reviews)).
 
-У консолі з'являється посилання на Aspire Dashboard; усі десять ресурсів — `mongo`, `ReviewsDb`,
-`sql`, `CatalogDb`, `RepairsDb`, `repairs-api`, `catalog-api`, `reviews-api`, `aggregator` і
+У консолі з'являється посилання на Aspire Dashboard; усі одинадцять ресурсів — `mongo`, `ReviewsDb`,
+`redis`, `sql`, `CatalogDb`, `RepairsDb`, `repairs-api`, `catalog-api`, `reviews-api`, `aggregator` і
 `gateway` — мають перейти в стан **Running**. Перший запуск триває довше: завантажуються образи й
 стартують сервери баз.
 
-![Aspire Dashboard: бази, три сервіси, aggregator і gateway у стані Running](docs/img/aspire-dashboard.png)
+![Aspire Dashboard: бази, Redis, три сервіси з REST- і gRPC-портами, aggregator і gateway у стані Running](docs/img/aspire-dashboard.png)
 
 | Що | Адреса |
 |----|--------|
@@ -185,19 +187,21 @@ dotnet run --project Platform.AppHost
 
 Ресурси AppHost відповідають проєктам так:
 
-| Ресурс | Проєкт | Порт |
-|--------|--------|------|
-| `repairs-api` | `Services/Repairs/Repairs.Api` | 5077 |
-| `catalog-api` | `Services/Catalog/Catalog.Api` | 5078 |
-| `reviews-api` | `Services/Reviews/Reviews.WebApi` | 5079 |
-| `aggregator` | `Platform.Aggregator` | 5080 |
-| `gateway` | `Platform.ApiGateway` | 5000 |
+| Ресурс | Проєкт | REST (HTTP/1.1) | gRPC (HTTP/2) |
+|--------|--------|-----------------|---------------|
+| `repairs-api` | `Services/Repairs/Repairs.Api` | 5077 | 5177 |
+| `catalog-api` | `Services/Catalog/Catalog.Api` | 5078 | 5178 |
+| `reviews-api` | `Services/Reviews/Reviews.WebApi` | 5079 | 5179 |
+| `aggregator` | `Platform.Aggregator` | 5080 | — |
+| `gateway` | `Platform.ApiGateway` | 5000 | — |
+| `redis` | контейнер Redis | — | — |
 
 Ресурси баз в AppHost мають імена `RepairsDb`, `CatalogDb` і `ReviewsDb` — ті самі, що й рядки
 підключення сервісів, тому Aspire передає їх змінними оточення `ConnectionStrings__RepairsDb`,
 `ConnectionStrings__CatalogDb` і `ConnectionStrings__ReviewsDb`. Пароль і TLS для контейнера MongoDB
-Aspire налаштовує сам. Ім'я ресурсу є й адресою для service discovery: шлюз і агрегатор звертаються
-до `http://repairs-api`, а не до `localhost:5077`.
+Aspire налаштовує сам, так само як пароль і TLS для Redis (рядок підключення
+`ConnectionStrings__redis`). Ім'я ресурсу є й адресою для service discovery: шлюз звертається до
+`http://repairs-api`, а не до `localhost:5077`, агрегатор — до gRPC-endpoint `http://_grpc.repairs-api`.
 
 Дані зберігаються в томах Docker і переживають перезапуск; скрипти, міграції та початкове наповнення
 ідемпотентні, тож повторний старт нічого не дублює. Повернутися до початкових даних — зупинити AppHost і видалити том:
@@ -278,8 +282,9 @@ curl -i http://localhost:5000/api/repairs/catalog-items/1
 curl -i -H "X-Correlation-Id: support-ticket-42" http://localhost:5000/api/customers/1
 ```
 
-Картка ремонтного замовлення — агрегатор паралельно (`Task.WhenAll`) збирає замовлення з Repairs,
-актуальні дані позицій з Catalog і відгуки з Reviews:
+Картка ремонтного замовлення — агрегатор gRPC-викликами отримує замовлення з Repairs, а потім
+паралельно (`Task.WhenAll`) — актуальні дані позицій з Catalog і відгуки з Reviews; готову картку
+кешує в Redis на 30 с:
 
 ```bash
 curl -i http://localhost:5000/api/aggregator/repair-orders/1/full
@@ -288,34 +293,110 @@ curl -i http://localhost:5000/api/aggregator/repair-orders/1/full
 Відповідь містить `order`, `parts` (знімок ціни із замовлення і вкладений блок `catalog` з поточною
 ціною й ознакою `priceChanged`), `reviews` і `warnings`. Якщо зупинити `reviews-api` у Dashboard,
 той самий запит повертає 200 із замовленням і позиціями, без відгуків, і з
-`"warnings": ["reviews-api is unavailable"]`. Неіснуюче замовлення — 404, недоступний `repairs-api`
-— 503 у форматі `ProblemDetails`.
+`"warnings": ["reviews-api is unavailable"]` (таку часткову картку агрегатор не кешує). Неіснуюче
+замовлення — 404, недоступний `repairs-api` — 503 у форматі `ProblemDetails`.
 
 Усі застосунки підключають `Platform.ServiceDefaults`: Serilog пише JSON у консоль і передає кожен
 запис в OpenTelemetry, тож у вкладці *Structured logs* видно атрибути `ServiceName`, `CorrelationId`,
 `EnvironmentName`, `MachineName`, `ThreadId`, а також `TraceId` і `SpanId`. У вкладці *Traces* один
-запит до агрегатора — це один trace від шлюзу до SQL- і MongoDB-запитів:
+запит до агрегатора — це один trace від шлюзу через gRPC-виклики до SQL-, MongoDB- і Redis-запитів:
 
-![Trace агрегувального запиту: gateway, aggregator, паралельні виклики catalog-api і reviews-api, SQL- і MongoDB-spans](docs/img/platform-trace.png)
+![Trace агрегувального запиту: gateway, aggregator, gRPC-виклики RepairsService, CatalogService і ReviewsService, SQL-, MongoDB- і Redis-spans](docs/img/aggregator-grpc-trace.png)
 
 Фільтр *Structured logs* `CorrelationId contains <значення>` знаходить записи всіх сервісів одного
-звернення:
+звернення — `X-Correlation-Id` доходить до сервісів і в метаданих gRPC-викликів:
 
-![Structured logs, відфільтровані за одним CorrelationId](docs/img/platform-logs-correlation.png)
+![Structured logs, відфільтровані за одним CorrelationId: записи gRPC-interceptor і кешу в aggregator, catalog-api, reviews-api](docs/img/grpc-logs-correlation.png)
+
+## gRPC і кешування
+
+Сервіси мають два API: REST для зовнішніх клієнтів (через шлюз) і gRPC для внутрішніх викликів
+агрегатора. Контракти — у `Protos/` кожного API-проєкту, реалізації — у `Grpc/`; агрегатор генерує
+клієнтів із тих самих `.proto`. Докладно — [`docs/platform.md`](docs/platform.md#grpc-контракти).
+
+| Сервіс | Контракт | gRPC-методи |
+|--------|----------|-------------|
+| Repairs | `Services/Repairs/Repairs.Api/Protos/repairs.proto` | `RepairsService.GetRepairOrder` |
+| Catalog | `Services/Catalog/Catalog.Api/Protos/catalog.proto` | `CatalogService.GetCatalogItem`, `GetCatalogItemsByIds`, `ListCategories` |
+| Reviews | `Services/Reviews/Reviews.WebApi/Protos/reviews.proto` | `ReviewsService.GetReview`, `GetRepairOrderReviews` |
+
+- gRPC-сервіси — адаптери над BLL: перевіряють вхід (`InvalidArgument`), перетворюють доменні винятки
+  на `RpcException` (`NotFound`, `FailedPrecondition`), передають `CancellationToken` виклику.
+- gRPC працює на окремому endpoint лише з HTTP/2 (порти 5177–5179), REST — на звичному HTTP/1.1.
+- `GrpcServerLoggingInterceptor` з ServiceDefaults пише метод, peer, статус і тривалість кожного виклику.
+- Агрегатор робить 3 gRPC-виклики замість колишніх `1 + N + (N + 1)` HTTP-запитів, другий і третій —
+  паралельно; недоступний сервіс (`Unavailable`, `DeadlineExceeded`) дає попередження замість помилки.
+
+**Кеш Catalog** — дворівневий, у `Catalog.Bll/Caching/`: L1 — `IMemoryCache` з обмеженням розміру,
+sliding і absolute expiration; L2 — Redis через `IDistributedCache` (Aspire-інтеграція
+`AddRedisDistributedCache("redis")`). Читання: L1 → L2 → база, рівні заповнюються на зворотному шляху,
+L1 живе коротше за L2. Будь-який запис у Catalog одразу видаляє пов'язані ключі (`catalog:item:{id}`,
+версії списків). Якщо Redis недоступний, сервіс працює з L1 і базою. Агрегатор кешує готову картку в
+Redis на 30 с (`aggregator:repair-order:{id}:card`), часткові картки не кешує. Докладно —
+[`docs/catalog-service.md`](docs/catalog-service.md#кешування).
+
+Повторний запит тієї самої категорії: перший іде в Redis і `CatalogDb`, другий обслуговує кеш у
+пам'яті — у trace немає SQL-span:
+
+![Два запити GET /api/categories/4: перший зі spans redis і CatalogDb, повторний лише gateway і catalog-api](docs/img/catalog-cache-traces.png)
+
+![Trace повторного запиту: gateway → catalog-api, 3 spans, без SQL](docs/img/catalog-cache-hit-trace.png)
+
+Метрика попадань у кеш (`Meter` `Catalog.Cache`, лічильник `cache.hits` з тегами `cache.level` L1/L2 і
+`cache.entry`):
+
+![Dashboard, метрика cache.hits сервісу catalog-api](docs/img/catalog-cache-hits-metric.png)
+
+Перевірка вручну:
+
+```bash
+curl -i http://localhost:5000/api/catalog-items/3
+```
+
+```bash
+curl -i -X PATCH http://localhost:5000/api/catalog-items/3/price -H "Content-Type: application/json" -d "{\"price\": 1234.50}"
+```
+
+```bash
+curl -i http://localhost:5000/api/catalog-items/3
+```
+
+Друге читання повертає нову ціну: у журналі catalog-api видно `Cache invalidated "catalog:item:3",
+reason "CatalogItemPriceChanged"`, потім промах L1 і L2 та SQL-запит.
+
+### Порівняння HTTP і gRPC
+
+Той самий запит картки через шлюз, 50 вимірів для 5 замовлень (методика —
+[`docs/platform.md`](docs/platform.md#http-проти-grpc)):
+
+| Варіант | Викликів до сервісів | p50 | p95 |
+|---------|----------------------|-----|-----|
+| HTTP, без кешів (до переходу на gRPC) | 8 | 21,7 мс | 38,8 мс |
+| gRPC, картку зібрано заново | 3 | 29,0 мс | 49,8 мс |
+| gRPC, повторний запит (картка з Redis) | 0 | 6,4 мс | 25,9 мс |
+
+Окремий gRPC-виклик не повільніший за HTTP-виклик, а викликів утричі менше. Картка, зібрана заново,
+довша на операції з Redis (перевірка й запис картки, читання L2 у Catalog), яких у HTTP-версії не
+було; на localhost із невеликими повідомленнями транспорт займає малу частку часу. Повторний запит у
+межах 30 с у 3,4 раза швидший за HTTP-версію, але цей виграш дає кеш картки (сервіси й gRPC на цьому
+шляху не викликаються), а HTTP-версію виміряно без кешів.
+
+![HTTP: окремі GET до catalog-api на кожну позицію і до reviews-api — 33 spans](docs/img/aggregator-http-trace.png)
 
 ## Схема рішення
 
 ```mermaid
 flowchart TB
     Client["Клієнт"] -->|":5000"| GW["Platform.ApiGateway<br/>YARP, CorrelationId, журнал маршрутизації"]
-    GW --> Agg["Platform.Aggregator<br/>typed HttpClients, Task.WhenAll"]
+    GW --> Agg["Platform.Aggregator<br/>gRPC-клієнти, Task.WhenAll, кеш картки"]
     GW --> Api
     GW --> CApi
     GW --> WApi
-    Agg -.->|https+http://repairs-api| Api
-    Agg -.->|https+http://catalog-api| CApi
-    Agg -.->|https+http://reviews-api| WApi
-    SD["Platform.ServiceDefaults<br/>Serilog, OpenTelemetry, health, resilience"] -.->|підключають усі застосунки| GW
+    Agg -.->|gRPC http://_grpc.repairs-api| Api
+    Agg -.->|gRPC http://_grpc.catalog-api| CApi
+    Agg -.->|gRPC http://_grpc.reviews-api| WApi
+    Agg -->|aggregator:*| Redis[("Redis<br/>кеш")]
+    SD["Platform.ServiceDefaults<br/>Serilog, OpenTelemetry, health, resilience, gRPC-interceptor"] -.->|підключають усі застосунки| GW
 
     AppHost["Platform.AppHost<br/>.NET Aspire"] -->|запускає| GW
     AppHost -->|запускає| Agg
@@ -325,26 +406,27 @@ flowchart TB
     AppHost -->|запускає контейнер,<br/>застосовує db/p1| Db[("SQL Server<br/>RepairsDb")]
     AppHost -->|створює порожню базу| CDb[("SQL Server<br/>CatalogDb")]
     AppHost -->|запускає контейнер| MDb[("MongoDB<br/>ReviewsDb")]
+    AppHost -->|запускає контейнер| Redis
     AppHost -.->|ConnectionStrings__RepairsDb| Api
     AppHost -.->|ConnectionStrings__CatalogDb| CApi
     AppHost -.->|ConnectionStrings__ReviewsDb| WApi
 
     subgraph Repairs["Services/Repairs"]
-        Api["Repairs.Api<br/>контролери, ProblemDetails, Swagger"] --> Bll["Repairs.Bll<br/>сервіси, DTO, AutoMapper"]
+        Api["Repairs.Api<br/>контролери, gRPC-сервіс, ProblemDetails, Swagger"] --> Bll["Repairs.Bll<br/>сервіси, DTO, AutoMapper"]
         Bll --> Dal["Repairs.Dal<br/>репозиторії ADO.NET і Dapper, Unit of Work"]
         Bll --> Domain["Repairs.Domain<br/>моделі, винятки"]
         Dal --> Domain
     end
 
     subgraph Catalog["Services/Catalog"]
-        CApi["Catalog.Api<br/>контролери, ProblemDetails, Swagger"] --> CBll["Catalog.Bll<br/>сервіси, DTO, специфікації, валідатори"]
+        CApi["Catalog.Api<br/>контролери, gRPC-сервіс, ProblemDetails, Swagger"] --> CBll["Catalog.Bll<br/>сервіси, кеш L1 + L2, DTO, специфікації, валідатори"]
         CBll --> CDal["Catalog.Dal<br/>DbContext, міграції, репозиторії, Unit of Work"]
         CBll --> CDomain["Catalog.Domain<br/>сутності з правилами, винятки"]
         CDal --> CDomain
     end
 
     subgraph Reviews["Services/Reviews"]
-        WApi["Reviews.WebApi<br/>контролери, ProblemDetails, Swagger"] --> App["Reviews.Application<br/>команди, запити, behaviors, валідатори"]
+        WApi["Reviews.WebApi<br/>контролери, gRPC-сервіс, ProblemDetails, Swagger"] --> App["Reviews.Application<br/>команди, запити, behaviors, валідатори"]
         WApi -.->|реєстрація DI| Infra
         Infra["Reviews.Infrastructure<br/>MongoDbContext, BsonClassMap, репозиторій, сідінг"] --> App
         Infra --> WDomain["Reviews.Domain<br/>сутності, value objects"]
@@ -353,6 +435,7 @@ flowchart TB
 
     Dal --> Db
     CDal -->|міграції, LINQ to Entities| CDb
+    CBll -->|"catalog:* (L2)"| Redis
     Infra -->|MongoDB Driver| MDb
 ```
 
@@ -372,7 +455,8 @@ flowchart TB
 - **Catalog.Api** — асинхронні контролери, явний виклик валідаторів, глобальний обробник помилок;
   журнал і кореляцію запитів дає `Platform.ServiceDefaults`.
 - **Catalog.Bll** — сервіси, що працюють лише через Unit of Work; DTO, профілі AutoMapper,
-  специфікації запитів і валідатори FluentValidation.
+  специфікації запитів і валідатори FluentValidation; `Caching/` — дворівневий кеш (декоратори
+  сервісів поверх `IMemoryCache` і Redis).
 - **Catalog.Dal** — `CatalogDbContext`, конфігурації Fluent API, міграції, узагальнений і три
   спеціалізовані репозиторії, `UnitOfWork` з єдиним `SaveChangesAsync`, початкове наповнення.
 - **Catalog.Domain** — сутності, які самі перевіряють свої правила, і доменні винятки.

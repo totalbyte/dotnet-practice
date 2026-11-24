@@ -23,7 +23,7 @@ SQL є тільки в `Repairs.Dal`.
 | `Repairs.Bll` | сервіси та їхні інтерфейси, DTO з `DataAnnotations`, профілі AutoMapper |
 | `Repairs.Dal` | інтерфейси й реалізації репозиторіїв, `UnitOfWork`, перетворення `SqlException` на доменні винятки |
 | `Repairs.Domain` | моделі таблиць, константи статусів і типів, `NotFoundException`, `BusinessConflictException`, `ValidationException` |
-| `Repairs.Tests` | модульні тести сервісів і перевірка конфігурації мапінгу |
+| `Repairs.Tests` | модульні тести сервісів, gRPC-сервісу і перевірка конфігурації мапінгу |
 
 ## Доступ до даних
 
@@ -89,6 +89,17 @@ SQL є тільки в `Repairs.Dal`.
 | `50010`; перевірки сервісів, що потребують стану бази | `ValidationException` | 400 |
 | некоректна модель запиту (`DataAnnotations`) | — | 400 |
 | будь-що інше | — | 500 без подробиць у відповіді |
+
+## gRPC
+
+Для агрегатора сервіс має gRPC-контракт `Repairs.Api/Protos/repairs.proto` (`RepairsService`,
+метод `GetRepairOrder`) на окремому endpoint лише з HTTP/2 (порт 5177). `Grpc/RepairsGrpcService` —
+адаптер над `IRepairOrderService`, як контролер: перевіряє Id (`InvalidArgument` для Id ≤ 0),
+передає `context.CancellationToken`, перетворює DTO на повідомлення (статус — перелічення
+`RepairOrderStatus`, гроші — `DecimalValue`, дати — `Timestamp`), а доменні винятки — на
+`RpcException`: `NotFoundException` → `NotFound`, `ValidationException` → `InvalidArgument`,
+`BusinessConflictException` → `FailedPrecondition`. У відповідь потрапляють лише поля, потрібні
+картці замовлення: серійного номера пристрою й контактів клієнта там немає.
 
 ## Валідація
 
