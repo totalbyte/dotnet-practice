@@ -41,11 +41,9 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel
     .Configure(builder.Configuration.GetSection("Kestrel"), reloadOnChange: true)
     .Endpoint("grpc", endpoint => endpoint.ListenOptions.Protocols = HttpProtocols.Http2));
 
-builder.Services.AddGrpc(options =>
-{
-    options.Interceptors.Add<GrpcServerLoggingInterceptor>();
-    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
-});
+builder.Services
+    .AddGrpc(options => options.EnableDetailedErrors = builder.Environment.IsDevelopment())
+    .AddServerLogging();
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();

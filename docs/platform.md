@@ -142,7 +142,8 @@ flowchart LR
 ### gRPC-interceptor
 
 `Grpc/GrpcServerLoggingInterceptor` — серверний interceptor, який сервіси підключають через
-`AddGrpc(o => o.Interceptors.Add<GrpcServerLoggingInterceptor>())`. Для кожного unary-виклику він:
+`AddGrpc(...).AddServerLogging()`; розширення з `Grpc/GrpcServerLoggingExtensions` додає
+`Interceptors.Add<GrpcServerLoggingInterceptor>()` до параметрів gRPC-сервера. Для кожного unary-виклику він:
 
 - відкриває scope журналу з `Transport = grpc` і `RpcMethod` — усе, що пишеться всередині виклику
   (зокрема попадання в кеш), можна відфільтрувати від REST-запитів;
