@@ -7,7 +7,20 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="Aspire.StackExchange.Redis.DistributedCaching" Version="13.6.5" />
+    <PackageReference Include="Google.Protobuf" Version="3.36.2" />
+    <PackageReference Include="Grpc.Net.ClientFactory" Version="2.85.0" />
+    <PackageReference Include="Grpc.Tools" Version="2.85.0">
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
     <PackageReference Include="Swashbuckle.AspNetCore" Version="11.0.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="..\Services\Repairs\Repairs.Api\Protos\repairs.proto" GrpcServices="Client" Link="Protos\repairs.proto" />
+    <Protobuf Include="..\Services\Catalog\Catalog.Api\Protos\catalog.proto" GrpcServices="Client" Link="Protos\catalog.proto" />
+    <Protobuf Include="..\Services\Reviews\Reviews.WebApi\Protos\reviews.proto" GrpcServices="Client" Link="Protos\reviews.proto" />
   </ItemGroup>
 
   <ItemGroup>

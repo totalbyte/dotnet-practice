@@ -1,9 +1,18 @@
-using System.Web;
+using System.Diagnostics.Metrics;
+using Catalog.Grpc;
+using Google.Protobuf.WellKnownTypes;
+using Grpc.Core;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
-using Platform.Aggregator.Clients;
-using Platform.Aggregator.Clients.Contracts;
+using Microsoft.Extensions.Options;
+using Platform.Aggregator.Caching;
 using Platform.Aggregator.Services;
 using Polly.Timeout;
+using Repairs.Grpc;
+using Reviews.Grpc;
+using CatalogDecimal = Catalog.Grpc.DecimalValue;
+using RepairsDecimal = Repairs.Grpc.DecimalValue;
 
 namespace Platform.Tests.Aggregator;
 
@@ -11,47 +20,57 @@ public sealed class RepairOrderCardServiceTests
 {
     private const long OrderId = 7;
 
-    private static readonly RepairOrderResponse Order = new()
-    {
-        Id = OrderId,
-        CustomerId = 3,
-        Status = "InRepair",
-        AcceptedAt = new DateTime(2026, 11, 1, 9, 0, 0, DateTimeKind.Utc),
-        Device = new RepairOrderDeviceResponse
-        {
-            DeviceType = "Smartphone", DeviceBrand = "Apple", DeviceModel = "iPhone 13", DefectDescription = "Broken screen"
-        },
-        Items =
-        [
-            new RepairOrderItemResponse { CatalogItemId = 1, ItemName = "Screen", UnitPrice = 100m, Quantity = 1, LineTotal = 100m },
-            new RepairOrderItemResponse { CatalogItemId = 2, ItemName = "Labour", UnitPrice = 50m, Quantity = 1, LineTotal = 50m }
-        ],
-        TotalAmount = 150m
-    };
+    private static readonly DateTime CreatedAt = new(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc);
 
-    private StubHttpHandler _repairs = StubHttpHandler.Json(_ => Order);
-    private StubHttpHandler _catalog = StubHttpHandler.Json(request => CatalogItem(IdFromPath(request)));
-    private StubHttpHandler _reviews = StubHttpHandler.Json(ReviewsPage);
+    private readonly IDistributedCache _redis =
+        new MemoryDistributedCache(Options.Create(new MemoryDistributedCacheOptions()));
+
+    private FakeRepairsClient _repairs = new((_, _) => GrpcCalls.Success(Order()));
+    private FakeCatalogClient _catalog = new((request, _) => GrpcCalls.Success(CatalogItems(request.Ids)));
+    private FakeReviewsClient _reviews = new((request, _) => GrpcCalls.Success(ReviewsFor(request)));
 
     [Fact]
-    public async Task Builds_full_card_from_all_services()
+    public async Task Builds_full_card_with_one_call_per_service()
     {
         var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
 
         Assert.NotNull(card);
         Assert.Empty(card.Warnings);
         Assert.Equal(OrderId, card.Order.Id);
+        Assert.Equal("InRepair", card.Order.Status);
         Assert.Equal("iPhone 13", card.Order.Device!.Model);
+        Assert.Equal(150m, card.Order.TotalAmount);
         Assert.All(card.Parts, part => Assert.NotNull(part.Catalog));
         Assert.True(card.Parts.Single(part => part.CatalogItemId == 1).Catalog!.PriceChanged);
         Assert.False(card.Parts.Single(part => part.CatalogItemId == 2).Catalog!.PriceChanged);
         Assert.Equal(["r-item-1", "r-item-2", "r-order"], card.Reviews.Select(review => review.Id).Order());
+        Assert.Equal([1L, 2L], Assert.Single(_catalog.Requests).Ids);
+        Assert.Equal([1L, 2L], Assert.Single(_reviews.Requests).CatalogItemIds);
+    }
+
+    [Fact]
+    public async Task Passes_deadline_and_cancellation_token_to_every_call()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var options = new List<CallOptions>();
+        _repairs = new((_, o) => { options.Add(o); return GrpcCalls.Success(Order()); });
+        _catalog = new((request, o) => { options.Add(o); return GrpcCalls.Success(CatalogItems(request.Ids)); });
+        _reviews = new((request, o) => { options.Add(o); return GrpcCalls.Success(ReviewsFor(request)); });
+
+        await CreateService().GetAsync(OrderId, cancellation.Token);
+
+        Assert.Equal(3, options.Count);
+        Assert.All(options, o =>
+        {
+            Assert.Equal(cancellation.Token, o.CancellationToken);
+            Assert.NotNull(o.Deadline);
+        });
     }
 
     [Fact]
     public async Task Returns_order_and_parts_with_warning_when_reviews_api_is_unavailable()
     {
-        _reviews = StubHttpHandler.Failing(new HttpRequestException("Connection refused"));
+        _reviews = new((_, _) => GrpcCalls.Failure<ReviewsReply>(StatusCode.Unavailable));
 
         var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
 
@@ -62,9 +81,9 @@ public sealed class RepairOrderCardServiceTests
     }
 
     [Fact]
-    public async Task Returns_order_without_catalog_data_when_catalog_api_times_out()
+    public async Task Returns_order_without_catalog_data_when_catalog_api_misses_the_deadline()
     {
-        _catalog = StubHttpHandler.Failing(new TimeoutRejectedException());
+        _catalog = new((_, _) => GrpcCalls.Failure<CatalogItemsReply>(StatusCode.DeadlineExceeded));
 
         var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
 
@@ -75,9 +94,20 @@ public sealed class RepairOrderCardServiceTests
     }
 
     [Fact]
+    public async Task Treats_resilience_timeout_as_unavailable_service()
+    {
+        _catalog = new((_, _) => GrpcCalls.Failure<CatalogItemsReply>(StatusCode.Internal, new TimeoutRejectedException()));
+
+        var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
+
+        Assert.NotNull(card);
+        Assert.Equal(["catalog-api is unavailable"], card.Warnings);
+    }
+
+    [Fact]
     public async Task Returns_null_when_repair_order_does_not_exist()
     {
-        _repairs = StubHttpHandler.Json(_ => null);
+        _repairs = new((_, _) => GrpcCalls.Failure<RepairOrderReply>(StatusCode.NotFound));
 
         var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
 
@@ -89,7 +119,7 @@ public sealed class RepairOrderCardServiceTests
     [Fact]
     public async Task Throws_when_repairs_api_is_unavailable()
     {
-        _repairs = StubHttpHandler.Failing(new HttpRequestException("Connection refused"));
+        _repairs = new((_, _) => GrpcCalls.Failure<RepairOrderReply>(StatusCode.Unavailable));
 
         var exception = await Assert.ThrowsAsync<UpstreamUnavailableException>(
             () => CreateService().GetAsync(OrderId, CancellationToken.None));
@@ -100,13 +130,16 @@ public sealed class RepairOrderCardServiceTests
     [Fact]
     public async Task Keeps_only_data_that_belongs_to_the_order()
     {
-        _catalog = StubHttpHandler.Json(request => IdFromPath(request) == 2 ? CatalogItem(99) : CatalogItem(1));
-        _reviews = StubHttpHandler.Json(_ => new ReviewPageResponse(
-        [
-            Review("r-order", repairOrderId: OrderId),
-            Review("r-foreign-order", repairOrderId: 8),
-            Review("r-foreign-item", catalogItemId: 5)
-        ], 3));
+        _catalog = new((_, _) => GrpcCalls.Success(new CatalogItemsReply { Items = { CatalogItem(1), CatalogItem(99) } }));
+        _reviews = new((_, _) => GrpcCalls.Success(new ReviewsReply
+        {
+            Reviews =
+            {
+                Review("r-order", repairOrderId: OrderId),
+                Review("r-foreign-order", repairOrderId: 8),
+                Review("r-foreign-item", catalogItemId: 5)
+            }
+        }));
 
         var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
 
@@ -117,22 +150,22 @@ public sealed class RepairOrderCardServiceTests
     }
 
     [Fact]
-    public async Task Queries_catalog_and_reviews_in_parallel()
+    public async Task Calls_catalog_and_reviews_in_parallel()
     {
         var catalogStarted = new TaskCompletionSource();
         var reviewsStarted = new TaskCompletionSource();
-        _catalog = new StubHttpHandler(async (request, _) =>
+        _catalog = new((request, _) => GrpcCalls.FromTask(Task.Run(async () =>
         {
             catalogStarted.TrySetResult();
             await reviewsStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            return await StubHttpHandler.Json(r => CatalogItem(IdFromPath(r))).InvokeAsync(request);
-        });
-        _reviews = new StubHttpHandler(async (request, _) =>
+            return CatalogItems(request.Ids);
+        })));
+        _reviews = new((request, _) => GrpcCalls.FromTask(Task.Run(async () =>
         {
             reviewsStarted.TrySetResult();
             await catalogStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            return await StubHttpHandler.Json(ReviewsPage).InvokeAsync(request);
-        });
+            return ReviewsFor(request);
+        })));
 
         var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
 
@@ -144,55 +177,163 @@ public sealed class RepairOrderCardServiceTests
     public async Task Propagates_cancellation_requested_by_the_client()
     {
         using var cancellation = new CancellationTokenSource();
-        _catalog = new StubHttpHandler(async (_, token) =>
+        _catalog = new((_, _) =>
         {
-            await cancellation.CancelAsync();
-            await Task.Delay(Timeout.Infinite, token);
-            throw new InvalidOperationException("Unreachable");
+            cancellation.Cancel();
+            return GrpcCalls.Failure<CatalogItemsReply>(StatusCode.Cancelled);
         });
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+        var exception = await Assert.ThrowsAsync<RpcException>(
             () => CreateService().GetAsync(OrderId, cancellation.Token));
+
+        Assert.Equal(StatusCode.Cancelled, exception.StatusCode);
     }
 
-    private RepairOrderCardService CreateService() => new(
-        new RepairsClient(Client(_repairs, "repairs-api"), NullLogger<RepairsClient>.Instance),
-        new CatalogClient(Client(_catalog, "catalog-api"), NullLogger<CatalogClient>.Instance),
-        new ReviewsClient(Client(_reviews, "reviews-api"), NullLogger<ReviewsClient>.Instance),
-        NullLogger<RepairOrderCardService>.Instance);
+    [Fact]
+    public async Task Serves_repeated_request_from_redis_without_grpc_calls()
+    {
+        var service = CreateService();
 
-    private static HttpClient Client(HttpMessageHandler handler, string service)
-        => new(handler) { BaseAddress = new Uri($"http://{service}") };
+        await service.GetAsync(OrderId, CancellationToken.None);
+        var cached = await service.GetAsync(OrderId, CancellationToken.None);
 
-    private static long IdFromPath(HttpRequestMessage request) => long.Parse(request.RequestUri!.Segments[^1]);
+        Assert.NotNull(cached);
+        Assert.Equal(2, cached.Parts.Count);
+        Assert.Single(_repairs.Requests);
+        Assert.Single(_catalog.Requests);
+        Assert.Single(_reviews.Requests);
+        Assert.NotNull(await _redis.GetAsync(RepairOrderCardCache.Key(OrderId)));
+    }
 
-    private static CatalogItemResponse CatalogItem(long id) => new()
+    [Fact]
+    public async Task Does_not_cache_partial_card()
+    {
+        _reviews = new((_, _) => GrpcCalls.Failure<ReviewsReply>(StatusCode.Unavailable));
+        var service = CreateService();
+
+        await service.GetAsync(OrderId, CancellationToken.None);
+        await service.GetAsync(OrderId, CancellationToken.None);
+
+        Assert.Equal(2, _repairs.Requests.Count);
+        Assert.Null(await _redis.GetAsync(RepairOrderCardCache.Key(OrderId)));
+    }
+
+    [Fact]
+    public async Task Builds_card_when_redis_is_down()
+    {
+        var card = await CreateService(new FailingDistributedCache()).GetAsync(OrderId, CancellationToken.None);
+
+        Assert.NotNull(card);
+        Assert.Empty(card.Warnings);
+    }
+
+    private RepairOrderCardService CreateService(IDistributedCache? redis = null)
+    {
+        var options = Options.Create(new AggregatorOptions());
+        var cache = new RepairOrderCardCache(redis ?? _redis, new AggregatorCacheMetrics(new TestMeterFactory()),
+            options, TimeProvider.System, NullLogger<RepairOrderCardCache>.Instance);
+        return new RepairOrderCardService(
+            _repairs, _catalog, _reviews, cache, options, NullLogger<RepairOrderCardService>.Instance);
+    }
+
+    private static RepairOrderReply Order() => new()
+    {
+        Id = OrderId,
+        CustomerId = 3,
+        Status = RepairOrderStatus.InRepair,
+        AcceptedAt = Timestamp.FromDateTime(new DateTime(2026, 11, 1, 9, 0, 0, DateTimeKind.Utc)),
+        Device = new Device
+        {
+            DeviceType = "Smartphone", DeviceBrand = "Apple", DeviceModel = "iPhone 13", DefectDescription = "Broken screen"
+        },
+        Items =
+        {
+            new RepairOrderItem
+            {
+                CatalogItemId = 1, ItemName = "Screen", UnitPrice = RepairsMoney(100), Quantity = 1,
+                Discount = RepairsMoney(0), LineTotal = RepairsMoney(100)
+            },
+            new RepairOrderItem
+            {
+                CatalogItemId = 2, ItemName = "Labour", UnitPrice = RepairsMoney(50), Quantity = 1,
+                Discount = RepairsMoney(0), LineTotal = RepairsMoney(50)
+            }
+        },
+        TotalAmount = RepairsMoney(150)
+    };
+
+    private static CatalogItemsReply CatalogItems(IEnumerable<long> ids)
+        => new() { Items = { ids.Select(CatalogItem) } };
+
+    private static CatalogItemReply CatalogItem(long id) => new()
     {
         Id = id,
         Sku = $"SKU-{id}",
         Name = $"Item {id}",
-        ItemType = id == 2 ? "Service" : "Part",
-        Price = id == 1 ? 120m : 50m,
+        ItemType = id == 2 ? CatalogItemType.Service : CatalogItemType.Part,
+        Price = new CatalogDecimal { Units = id == 1 ? 120 : 50 },
         IsActive = true
     };
 
-    private static ReviewPageResponse ReviewsPage(HttpRequestMessage request)
+    private static ReviewsReply ReviewsFor(GetRepairOrderReviewsRequest request) => new()
     {
-        var query = HttpUtility.ParseQueryString(request.RequestUri!.Query);
-        return query["repairOrderId"] is { } orderId
-            ? new ReviewPageResponse([Review("r-order", repairOrderId: long.Parse(orderId))], 1)
-            : new ReviewPageResponse([Review($"r-item-{query["catalogItemId"]}", catalogItemId: long.Parse(query["catalogItemId"]!))], 1);
+        Reviews =
+        {
+            request.CatalogItemIds.Select(id => Review($"r-item-{id}", catalogItemId: id))
+                .Prepend(Review("r-order", repairOrderId: request.RepairOrderId))
+        }
+    };
+
+    private static ReviewReply Review(string id, long? repairOrderId = null, long? catalogItemId = null)
+    {
+        var review = new ReviewReply
+        {
+            Id = id,
+            ReviewType = repairOrderId is null ? ReviewType.Item : ReviewType.Repair,
+            Rating = 5,
+            Text = "Good",
+            Author = new Author { CustomerId = 3, DisplayName = "Olena" },
+            CreatedAt = Timestamp.FromDateTime(CreatedAt)
+        };
+        if (repairOrderId is { } orderId)
+            review.RepairOrderId = orderId;
+        if (catalogItemId is { } itemId)
+            review.CatalogItemId = itemId;
+        return review;
     }
 
-    private static ReviewResponse Review(string id, long? repairOrderId = null, long? catalogItemId = null) => new()
+    private static RepairsDecimal RepairsMoney(long units) => new() { Units = units };
+
+    private sealed class TestMeterFactory : IMeterFactory
     {
-        Id = id,
-        ReviewType = repairOrderId is null ? "item" : "repair",
-        Rating = 5,
-        Text = "Good",
-        Author = new ReviewAuthorResponse(3, "Olena"),
-        RepairOrderId = repairOrderId,
-        CatalogItemId = catalogItemId,
-        CreatedAt = new DateTime(2026, 11, 10, 12, 0, 0, DateTimeKind.Utc)
-    };
+        public Meter Create(MeterOptions options) => new(options);
+
+        public void Dispose()
+        {
+        }
+    }
+
+    private sealed class FailingDistributedCache : IDistributedCache
+    {
+        public byte[]? Get(string key) => throw new TimeoutException("redis down");
+
+        public Task<byte[]?> GetAsync(string key, CancellationToken token = default)
+            => Task.FromException<byte[]?>(new TimeoutException("redis down"));
+
+        public void Set(string key, byte[] value, DistributedCacheEntryOptions options)
+            => throw new TimeoutException("redis down");
+
+        public Task SetAsync(string key, byte[] value, DistributedCacheEntryOptions options, CancellationToken token = default)
+            => Task.FromException(new TimeoutException("redis down"));
+
+        public void Refresh(string key) => throw new TimeoutException("redis down");
+
+        public Task RefreshAsync(string key, CancellationToken token = default)
+            => Task.FromException(new TimeoutException("redis down"));
+
+        public void Remove(string key) => throw new TimeoutException("redis down");
+
+        public Task RemoveAsync(string key, CancellationToken token = default)
+            => Task.FromException(new TimeoutException("redis down"));
+    }
 }
