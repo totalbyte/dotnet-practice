@@ -70,6 +70,7 @@ public static class Extensions
             .MinimumLevel.Override("Microsoft.Extensions.Http", LogEventLevel.Information)
             .MinimumLevel.Override("Microsoft.Extensions.ServiceDiscovery", LogEventLevel.Information)
             .MinimumLevel.Override("Polly", LogEventLevel.Warning)
+            .MinimumLevel.Override("Grpc", LogEventLevel.Information)
             .Enrich.FromLogContext()
             .Enrich.WithProperty("ServiceName", serviceName)
             .Enrich.WithEnvironmentName()

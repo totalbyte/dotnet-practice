@@ -1,0 +1,65 @@
+syntax = "proto3";
+
+option csharp_namespace = "Repairs.Grpc";
+
+package repairs;
+
+import "google/protobuf/timestamp.proto";
+
+// Read access to repair orders for internal services.
+service RepairsService {
+  // Returns the repair order with its device and items; NOT_FOUND when the order does not exist.
+  rpc GetRepairOrder (GetRepairOrderRequest) returns (RepairOrderReply);
+}
+
+message GetRepairOrderRequest {
+  int64 id = 1;
+}
+
+enum RepairOrderStatus {
+  REPAIR_ORDER_STATUS_UNSPECIFIED = 0;
+  REPAIR_ORDER_STATUS_ACCEPTED = 1;
+  REPAIR_ORDER_STATUS_DIAGNOSED = 2;
+  REPAIR_ORDER_STATUS_APPROVED = 3;
+  REPAIR_ORDER_STATUS_IN_REPAIR = 4;
+  REPAIR_ORDER_STATUS_READY = 5;
+  REPAIR_ORDER_STATUS_PAID = 6;
+  REPAIR_ORDER_STATUS_ISSUED = 7;
+  REPAIR_ORDER_STATUS_CANCELLED = 8;
+}
+
+// Exact decimal money amount: units + nanos / 10^9, both with the same sign.
+message DecimalValue {
+  int64 units = 1;
+  sfixed32 nanos = 2;
+}
+
+message RepairOrderReply {
+  int64 id = 1;
+  int64 customer_id = 2;
+  RepairOrderStatus status = 3;
+  google.protobuf.Timestamp accepted_at = 4;
+  // Not set until the device is issued.
+  google.protobuf.Timestamp issued_at = 5;
+  Device device = 6;
+  repeated RepairOrderItem items = 7;
+  DecimalValue total_amount = 8;
+}
+
+message Device {
+  string device_type = 1;
+  optional string device_brand = 2;
+  string device_model = 3;
+  string defect_description = 4;
+  optional string diagnostic_notes = 5;
+}
+
+// Name and price are a snapshot taken when the item was added to the order.
+message RepairOrderItem {
+  int64 catalog_item_id = 1;
+  string item_name = 2;
+  DecimalValue unit_price = 3;
+  int32 quantity = 4;
+  DecimalValue discount = 5;
+  DecimalValue line_total = 6;
+}

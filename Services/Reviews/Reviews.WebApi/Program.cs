@@ -1,12 +1,15 @@
 using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Platform.ServiceDefaults.Correlation;
+using Platform.ServiceDefaults.Grpc;
 using Reviews.Application;
 using Reviews.Application.Common.Mappings;
 using Reviews.Infrastructure;
 using Reviews.Infrastructure.Persistence;
 using Reviews.WebApi.ExceptionHandling;
+using Reviews.WebApi.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,6 +39,16 @@ builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = 
         Activity.Current?.TraceId.ToString() ?? context.HttpContext.TraceIdentifier);
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
+builder.WebHost.ConfigureKestrel(kestrel => kestrel
+    .Configure(builder.Configuration.GetSection("Kestrel"), reloadOnChange: true)
+    .Endpoint("grpc", endpoint => endpoint.ListenOptions.Protocols = HttpProtocols.Http2));
+
+builder.Services.AddGrpc(options =>
+{
+    options.Interceptors.Add<GrpcServerLoggingInterceptor>();
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -51,6 +64,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGrpcService<ReviewsGrpcService>();
 app.MapDefaultEndpoints();
 
 app.Run();

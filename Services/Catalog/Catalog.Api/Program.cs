@@ -1,5 +1,6 @@
 using System.Text.Json.Serialization;
 using Catalog.Api.ExceptionHandling;
+using Catalog.Api.Grpc;
 using Catalog.Bll.Caching;
 using Catalog.Bll.Mapping;
 using Catalog.Bll.Validation;
@@ -7,8 +8,10 @@ using Catalog.Dal;
 using Catalog.Dal.Interfaces;
 using Catalog.Dal.Seeding;
 using FluentValidation;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using Platform.ServiceDefaults.Correlation;
+using Platform.ServiceDefaults.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -52,6 +55,16 @@ builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = 
         CorrelationIdMiddleware.GetCorrelationId(context.HttpContext));
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
 
+builder.WebHost.ConfigureKestrel(kestrel => kestrel
+    .Configure(builder.Configuration.GetSection("Kestrel"), reloadOnChange: true)
+    .Endpoint("grpc", endpoint => endpoint.ListenOptions.Protocols = HttpProtocols.Http2));
+
+builder.Services.AddGrpc(options =>
+{
+    options.Interceptors.Add<GrpcServerLoggingInterceptor>();
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+});
+
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
@@ -75,6 +88,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGrpcService<CatalogGrpcService>();
 app.MapDefaultEndpoints();
 
 app.Run();
