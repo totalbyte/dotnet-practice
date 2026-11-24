@@ -1,0 +1,85 @@
+syntax = "proto3";
+
+option csharp_namespace = "Catalog.Grpc";
+
+package catalog;
+
+import "google/protobuf/timestamp.proto";
+
+// Read access to the catalog for internal services. Answers come from the two-level cache
+// (memory, then Redis) before the database, exactly as for the REST API.
+service CatalogService {
+  // Returns one catalog item; NOT_FOUND when it does not exist or was deleted.
+  rpc GetCatalogItem (GetCatalogItemRequest) returns (CatalogItemReply);
+
+  // Returns the existing items among the requested ids in request order; unknown ids are skipped.
+  rpc GetCatalogItemsByIds (GetCatalogItemsByIdsRequest) returns (CatalogItemsReply);
+
+  // Returns the category reference list, optionally only the children of one category.
+  rpc ListCategories (ListCategoriesRequest) returns (CategoriesReply);
+}
+
+message GetCatalogItemRequest {
+  int64 id = 1;
+}
+
+message GetCatalogItemsByIdsRequest {
+  // Up to 100 positive ids.
+  repeated int64 ids = 1;
+}
+
+message ListCategoriesRequest {
+  optional int32 parent_category_id = 1;
+}
+
+enum CatalogItemType {
+  CATALOG_ITEM_TYPE_UNSPECIFIED = 0;
+  CATALOG_ITEM_TYPE_PART = 1;
+  CATALOG_ITEM_TYPE_SERVICE = 2;
+}
+
+// Exact decimal money amount: units + nanos / 10^9, both with the same sign.
+message DecimalValue {
+  int64 units = 1;
+  sfixed32 nanos = 2;
+}
+
+message CatalogItemReply {
+  int64 id = 1;
+  string sku = 2;
+  string name = 3;
+  CatalogItemType item_type = 4;
+  DecimalValue price = 5;
+  optional int32 brand_id = 6;
+  optional string brand_name = 7;
+  bool is_active = 8;
+  int32 warranty_months = 9;
+  optional int32 estimated_duration_minutes = 10;
+  repeated ItemCategory categories = 11;
+  google.protobuf.Timestamp created_at = 12;
+  // Not set when the item was never updated.
+  google.protobuf.Timestamp updated_at = 13;
+}
+
+message ItemCategory {
+  int32 category_id = 1;
+  string name = 2;
+  string slug = 3;
+  bool is_primary = 4;
+}
+
+message CatalogItemsReply {
+  repeated CatalogItemReply items = 1;
+}
+
+message CategoryReply {
+  int32 id = 1;
+  string name = 2;
+  string slug = 3;
+  optional int32 parent_category_id = 4;
+  int32 display_order = 5;
+}
+
+message CategoriesReply {
+  repeated CategoryReply categories = 1;
+}

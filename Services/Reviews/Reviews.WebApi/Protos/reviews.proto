@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+option csharp_namespace = "Reviews.Grpc";
+
+package reviews;
+
+import "google/protobuf/timestamp.proto";
+
+// Read access to reviews for internal services.
+service ReviewsService {
+  // Returns one review; INVALID_ARGUMENT for a malformed id, NOT_FOUND when it does not exist.
+  rpc GetReview (GetReviewRequest) returns (ReviewReply);
+
+  // Returns the reviews of a repair order together with the latest reviews of its catalog items,
+  // newest first, in one call instead of one request per item.
+  rpc GetRepairOrderReviews (GetRepairOrderReviewsRequest) returns (ReviewsReply);
+}
+
+message GetReviewRequest {
+  // MongoDB ObjectId, 24 hexadecimal characters.
+  string id = 1;
+}
+
+message GetRepairOrderReviewsRequest {
+  int64 repair_order_id = 1;
+  // Up to 50 positive ids.
+  repeated int64 catalog_item_ids = 2;
+  // 1..100; 5 when not set.
+  int32 repair_reviews_limit = 3;
+  // 1..100; 3 when not set.
+  int32 item_reviews_limit = 4;
+}
+
+enum ReviewType {
+  REVIEW_TYPE_UNSPECIFIED = 0;
+  REVIEW_TYPE_REPAIR = 1;
+  REVIEW_TYPE_ITEM = 2;
+}
+
+message Author {
+  int64 customer_id = 1;
+  string display_name = 2;
+}
+
+message ReviewReply {
+  string id = 1;
+  ReviewType review_type = 2;
+  int32 rating = 3;
+  optional string title = 4;
+  string text = 5;
+  Author author = 6;
+  optional int64 catalog_item_id = 7;
+  optional int64 repair_order_id = 8;
+  int32 comments_count = 9;
+  google.protobuf.Timestamp created_at = 10;
+}
+
+message ReviewsReply {
+  repeated ReviewReply reviews = 1;
+}

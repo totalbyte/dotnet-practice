@@ -203,6 +203,22 @@ flowchart LR
 `serverSelectionTimeoutMS`, а не `MongoConnectionException`. Дубль, який проскочив асинхронну
 перевірку валідатора через одночасні запити, зупиняє унікальний індекс — 409, а не 500.
 
+## gRPC
+
+Для агрегатора сервіс має gRPC-контракт `Reviews.WebApi/Protos/reviews.proto` (`ReviewsService`) на
+окремому endpoint лише з HTTP/2 (порт 5179):
+
+- `GetReview` — один відгук (`GetReviewByIdQuery`);
+- `GetRepairOrderReviews` — відгуки про ремонт і останні відгуки про кожну його позицію одним
+  викликом. Запит `GetRepairOrderReviewsQuery` (з валідатором: Id > 0, не більше 50 позицій, ліміти
+  1..100) виконує вибірки для ремонту й кожної позиції паралельно, прибирає дублікати й сортує від
+  нових до старих. Раніше агрегатор робив для цього окремий HTTP-запит на кожну позицію.
+
+`Grpc/ReviewsGrpcService` — адаптер у WebApi-шарі: перевіряє ObjectId (`InvalidArgument`), надсилає
+запит через `ISender` MediatR (тож працюють усі behaviors: журнал, валідація, вимір тривалості) і
+перетворює винятки на `RpcException`: помилки FluentValidation → `InvalidArgument`, `NotFoundException`
+→ `NotFound`, `DomainException`/`ConflictException` → `FailedPrecondition`.
+
 ## Конфігурація
 
 | Файл | `MongoDb:ConnectionString` |
@@ -224,7 +240,10 @@ AppHost через `WithReference`; якщо такого рядка немає,
 
 ## Тести
 
-`Services/Reviews/Reviews.Tests` (xUnit, NSubstitute) — 42 тести без бази даних:
+`Services/Reviews/Reviews.Tests` (xUnit, NSubstitute) — 46 тестів без бази даних:
+
+- gRPC-сервіс: некоректний ObjectId — `InvalidArgument` без запиту до MediatR, відсутній відгук —
+  `NotFound`, помилка валідації — `InvalidArgument`, типові ліміти й перетворення відгуків у повідомлення;
 
 - домен: оцінка поза 1..5 (зокрема 10) кидає `DomainException`, обмеження 20 коментарів, правила
   відгуку про ремонт, м'яке видалення, конфлікт версій, рівність value objects;

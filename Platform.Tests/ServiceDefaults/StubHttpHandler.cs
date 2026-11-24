@@ -1,7 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
 
-namespace Platform.Tests.Aggregator;
+namespace Platform.Tests.ServiceDefaults;
 
 internal sealed class StubHttpHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> respond)
     : HttpMessageHandler

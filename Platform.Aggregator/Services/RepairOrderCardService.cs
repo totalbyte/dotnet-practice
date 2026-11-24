@@ -1,16 +1,22 @@
 using System.Diagnostics;
-using System.Text.Json;
+using Catalog.Grpc;
+using Grpc.Core;
+using Microsoft.Extensions.Options;
+using Platform.Aggregator.Caching;
 using Platform.Aggregator.Clients;
-using Platform.Aggregator.Clients.Contracts;
 using Platform.Aggregator.Dtos;
 using Polly;
+using Repairs.Grpc;
+using Reviews.Grpc;
 
 namespace Platform.Aggregator.Services;
 
 public sealed class RepairOrderCardService(
-    RepairsClient repairs,
-    CatalogClient catalog,
-    ReviewsClient reviews,
+    RepairsService.RepairsServiceClient repairs,
+    CatalogService.CatalogServiceClient catalog,
+    ReviewsService.ReviewsServiceClient reviews,
+    RepairOrderCardCache cache,
+    IOptions<AggregatorOptions> options,
     ILogger<RepairOrderCardService> logger)
 {
     public static readonly ActivitySource ActivitySource = new("Platform.Aggregator");
@@ -20,17 +26,48 @@ public sealed class RepairOrderCardService(
         using var activity = ActivitySource.StartActivity("AggregateRepairOrderCard");
         activity?.SetTag("repair_order.id", repairOrderId);
 
+        if (await cache.GetAsync(repairOrderId, cancellationToken) is { } cached)
+        {
+            activity?.SetTag("aggregator.cache", "hit");
+            logger.LogInformation("Card of repair order {RepairOrderId} served from cache", repairOrderId);
+            return cached;
+        }
+
+        activity?.SetTag("aggregator.cache", "miss");
+        var card = await BuildAsync(repairOrderId, activity, cancellationToken);
+        if (card is not null)
+            await cache.SetAsync(card, cancellationToken);
+
+        return card;
+    }
+
+    private async Task<RepairOrderCardDto?> BuildAsync(
+        long repairOrderId, Activity? activity, CancellationToken cancellationToken)
+    {
         var order = await GetRepairOrderAsync(repairOrderId, cancellationToken);
         if (order is null)
             return null;
 
         var itemIds = order.Items.Select(item => item.CatalogItemId).Distinct().ToList();
         var warnings = new List<string>();
+        var settings = options.Value;
 
-        var catalogTask = CallSafelyAsync(catalog.ServiceName,
-            () => catalog.GetItemsAsync(itemIds, cancellationToken), warnings, cancellationToken);
-        var reviewsTask = CallSafelyAsync(reviews.ServiceName,
-            () => reviews.GetForRepairOrderAsync(order.Id, itemIds, cancellationToken), warnings, cancellationToken);
+        var catalogTask = CallSafelyAsync(UpstreamServices.Catalog, async () => itemIds.Count == 0
+                ? []
+                : (await catalog.GetCatalogItemsByIdsAsync(
+                    new GetCatalogItemsByIdsRequest { Ids = { itemIds } },
+                    deadline: Deadline(), cancellationToken: cancellationToken)).Items.ToList(),
+            warnings, cancellationToken);
+        var reviewsTask = CallSafelyAsync(UpstreamServices.Reviews, async () => (await reviews.GetRepairOrderReviewsAsync(
+                new GetRepairOrderReviewsRequest
+                {
+                    RepairOrderId = order.Id,
+                    CatalogItemIds = { itemIds },
+                    RepairReviewsLimit = settings.RepairReviewsLimit,
+                    ItemReviewsLimit = settings.ItemReviewsLimit
+                },
+                deadline: Deadline(), cancellationToken: cancellationToken)).Reviews.ToList(),
+            warnings, cancellationToken);
 
         await Task.WhenAll(catalogTask, reviewsTask);
 
@@ -44,14 +81,14 @@ public sealed class RepairOrderCardService(
         if (itemsById is not null)
             warnings.AddRange(itemIds
                 .Where(id => !itemsById.ContainsKey(id))
-                .Select(id => $"Catalog item {id} was not found in {catalog.ServiceName}"));
+                .Select(id => $"Catalog item {id} was not found in {UpstreamServices.Catalog}"));
 
         var card = new RepairOrderCardDto(
             ToOrderInfo(order),
             [.. order.Items.Select(item => ToPart(item, itemsById?.GetValueOrDefault(item.CatalogItemId)))],
             [.. (orderReviews ?? [])
                 .Where(review => BelongsToOrder(review, order.Id, itemIds))
-                .OrderByDescending(review => review.CreatedAt)
+                .OrderByDescending(review => review.CreatedAt.ToDateTime())
                 .Select(ToReviewInfo)],
             warnings);
 
@@ -61,23 +98,32 @@ public sealed class RepairOrderCardService(
             order.Id, card.Parts.Count, card.Reviews.Count, warnings.Count);
 
         return card;
+
+        DateTime Deadline() => DateTime.UtcNow.Add(settings.CallDeadline);
     }
 
-    private async Task<RepairOrderResponse?> GetRepairOrderAsync(long id, CancellationToken cancellationToken)
+    private async Task<RepairOrderReply?> GetRepairOrderAsync(long id, CancellationToken cancellationToken)
     {
         var startedAt = Stopwatch.GetTimestamp();
         try
         {
-            var order = await repairs.GetRepairOrderAsync(id, cancellationToken);
-            logger.LogInformation("{Service} responded in {ElapsedMs} ms",
-                repairs.ServiceName, ElapsedMs(startedAt));
+            var order = await repairs.GetRepairOrderAsync(new GetRepairOrderRequest { Id = id },
+                deadline: DateTime.UtcNow.Add(options.Value.CallDeadline), cancellationToken: cancellationToken);
+            logger.LogInformation("{Service} responded in {ElapsedMs} ms", UpstreamServices.Repairs, ElapsedMs(startedAt));
             return order;
         }
-        catch (Exception ex) when (IsUnavailable(ex, cancellationToken))
+        catch (RpcException ex) when (ex.StatusCode is StatusCode.NotFound or StatusCode.InvalidArgument)
         {
-            logger.LogError(ex, "{Service} is unavailable after {ElapsedMs} ms, repair order {RepairOrderId} cannot be aggregated",
-                repairs.ServiceName, ElapsedMs(startedAt), id);
-            throw new UpstreamUnavailableException(repairs.ServiceName, ex);
+            logger.LogInformation("{Service} answered {GrpcStatus} for repair order {RepairOrderId} in {ElapsedMs} ms",
+                UpstreamServices.Repairs, ex.StatusCode, id, ElapsedMs(startedAt));
+            return null;
+        }
+        catch (RpcException ex) when (IsUnavailable(ex, cancellationToken))
+        {
+            logger.LogError(ex,
+                "{Service} is unavailable ({GrpcStatus}) after {ElapsedMs} ms, repair order {RepairOrderId} cannot be aggregated",
+                UpstreamServices.Repairs, ex.StatusCode, ElapsedMs(startedAt), id);
+            throw new UpstreamUnavailableException(UpstreamServices.Repairs, ex);
         }
     }
 
@@ -92,67 +138,75 @@ public sealed class RepairOrderCardService(
             logger.LogInformation("{Service} responded in {ElapsedMs} ms", service, ElapsedMs(startedAt));
             return result;
         }
-        catch (Exception ex) when (IsUnavailable(ex, cancellationToken))
+        catch (RpcException ex) when (IsUnavailable(ex, cancellationToken))
         {
-            logger.LogWarning(ex, "{Service} is unavailable after {ElapsedMs} ms: {ErrorType}",
-                service, ElapsedMs(startedAt), ex.GetType().Name);
+            logger.LogWarning(ex, "{Service} is unavailable ({GrpcStatus}) after {ElapsedMs} ms",
+                service, ex.StatusCode, ElapsedMs(startedAt));
             lock (warnings)
                 warnings.Add($"{service} is unavailable");
             return null;
         }
     }
 
-    private static bool IsUnavailable(Exception exception, CancellationToken cancellationToken) => exception switch
-    {
-        HttpRequestException or ExecutionRejectedException or JsonException => true,
-        OperationCanceledException => !cancellationToken.IsCancellationRequested,
-        _ => false
-    };
+    // Unavailable and DeadlineExceeded are the transport failures of gRPC; a rejection by the
+    // HTTP resilience pipeline (open circuit, exhausted timeout) reaches the client as Internal.
+    private static bool IsUnavailable(RpcException exception, CancellationToken cancellationToken)
+        => exception.StatusCode switch
+        {
+            StatusCode.Unavailable or StatusCode.DeadlineExceeded => true,
+            StatusCode.Internal => exception.Status.DebugException is ExecutionRejectedException or HttpRequestException,
+            StatusCode.Cancelled => !cancellationToken.IsCancellationRequested,
+            _ => false
+        };
 
-    private static bool BelongsToOrder(ReviewResponse review, long orderId, List<long> itemIds)
-        => review.RepairOrderId == orderId
-           || review.CatalogItemId is { } itemId && itemIds.Contains(itemId);
+    private static bool BelongsToOrder(ReviewReply review, long orderId, List<long> itemIds)
+        => review.HasRepairOrderId && review.RepairOrderId == orderId
+           || review.HasCatalogItemId && itemIds.Contains(review.CatalogItemId);
 
-    private static RepairOrderInfoDto ToOrderInfo(RepairOrderResponse order) => new(
+    private static RepairOrderInfoDto ToOrderInfo(RepairOrderReply order) => new(
         order.Id,
         order.CustomerId,
-        order.Status,
-        order.AcceptedAt,
-        order.IssuedAt,
+        order.Status.ToString(),
+        order.AcceptedAt.ToDateTime(),
+        order.IssuedAt?.ToDateTime(),
         order.Device is { } device
-            ? new DeviceInfoDto(device.DeviceType, device.DeviceBrand, device.DeviceModel,
-                device.DefectDescription, device.DiagnosticNotes)
+            ? new DeviceInfoDto(device.DeviceType, device.HasDeviceBrand ? device.DeviceBrand : null,
+                device.DeviceModel, device.DefectDescription, device.HasDiagnosticNotes ? device.DiagnosticNotes : null)
             : null,
-        order.TotalAmount);
+        order.TotalAmount.ToDecimal());
 
-    private static RepairOrderPartDto ToPart(RepairOrderItemResponse item, CatalogItemResponse? catalogItem) => new(
-        item.CatalogItemId,
-        item.ItemName,
-        item.Quantity,
-        item.UnitPrice,
-        item.Discount,
-        item.LineTotal,
-        catalogItem is null
-            ? null
-            : new CatalogItemInfoDto(
-                catalogItem.Sku,
-                catalogItem.Name,
-                catalogItem.ItemType,
-                catalogItem.BrandName,
-                catalogItem.Price,
-                catalogItem.Price != item.UnitPrice,
-                catalogItem.IsActive,
-                catalogItem.WarrantyMonths));
+    private static RepairOrderPartDto ToPart(RepairOrderItem item, CatalogItemReply? catalogItem)
+    {
+        var unitPrice = item.UnitPrice.ToDecimal();
+        return new RepairOrderPartDto(
+            item.CatalogItemId,
+            item.ItemName,
+            item.Quantity,
+            unitPrice,
+            item.Discount.ToDecimal(),
+            item.LineTotal.ToDecimal(),
+            catalogItem is null
+                ? null
+                : new CatalogItemInfoDto(
+                    catalogItem.Sku,
+                    catalogItem.Name,
+                    catalogItem.ItemType.ToString(),
+                    catalogItem.HasBrandName ? catalogItem.BrandName : null,
+                    catalogItem.Price.ToDecimal(),
+                    catalogItem.Price.ToDecimal() != unitPrice,
+                    catalogItem.IsActive,
+                    catalogItem.WarrantyMonths));
+    }
 
-    private static ReviewInfoDto ToReviewInfo(ReviewResponse review) => new(
+    private static ReviewInfoDto ToReviewInfo(ReviewReply review) => new(
         review.Id,
-        review.ReviewType,
+        review.ReviewType.ToString().ToLowerInvariant(),
         review.Rating,
-        review.Title,
+        review.HasTitle ? review.Title : null,
         review.Text,
         review.Author?.DisplayName,
-        review.CatalogItemId,
-        review.CreatedAt);
+        review.HasCatalogItemId ? review.CatalogItemId : null,
+        review.CreatedAt.ToDateTime());
 
     private static long ElapsedMs(long startedAt) => (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
 }

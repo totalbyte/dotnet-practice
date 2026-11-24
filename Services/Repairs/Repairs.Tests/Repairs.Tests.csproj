@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Repairs.Bll\Repairs.Bll.csproj" />
+    <ProjectReference Include="..\Repairs.Api\Repairs.Api.csproj" />
   </ItemGroup>
 
 </Project>

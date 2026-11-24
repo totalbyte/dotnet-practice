@@ -1,15 +1,17 @@
 using System.Text.Json.Serialization;
 using Catalog.Api.ExceptionHandling;
-using Catalog.Bll.Interfaces;
+using Catalog.Api.Grpc;
+using Catalog.Bll.Caching;
 using Catalog.Bll.Mapping;
-using Catalog.Bll.Services;
 using Catalog.Bll.Validation;
 using Catalog.Dal;
 using Catalog.Dal.Interfaces;
 using Catalog.Dal.Seeding;
 using FluentValidation;
+using Microsoft.AspNetCore.Server.Kestrel.Core;
 using Microsoft.EntityFrameworkCore;
 using Platform.ServiceDefaults.Correlation;
+using Platform.ServiceDefaults.Grpc;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -20,9 +22,20 @@ var connectionString = builder.Configuration.GetConnectionString("CatalogDb")
 
 builder.Services.AddDbContext<CatalogDbContext>(options => options.UseSqlServer(connectionString));
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
-builder.Services.AddScoped<ICatalogItemService, CatalogItemService>();
-builder.Services.AddScoped<ICategoryService, CategoryService>();
-builder.Services.AddScoped<IBrandService, BrandService>();
+
+var cacheOptions = builder.Configuration.GetSection(CatalogCacheOptions.SectionName).Get<CatalogCacheOptions>()
+    ?? new CatalogCacheOptions();
+
+builder.Services.AddMemoryCache(options =>
+{
+    options.SizeLimit = cacheOptions.MemorySizeLimitKilobytes;
+    options.CompactionPercentage = 0.25;
+    options.ExpirationScanFrequency = TimeSpan.FromSeconds(30);
+    options.TrackStatistics = true;
+});
+builder.AddRedisDistributedCache("redis");
+builder.Services.AddCatalogServicesWithCaching(builder.Configuration);
+builder.Services.AddHealthChecks().AddCheck<CacheStatisticsHealthCheck>("cache");
 
 builder.Services.AddAutoMapper(cfg =>
 {
@@ -41,6 +54,16 @@ builder.Services.AddProblemDetails(options => options.CustomizeProblemDetails = 
     context.ProblemDetails.Extensions["correlationId"] =
         CorrelationIdMiddleware.GetCorrelationId(context.HttpContext));
 builder.Services.AddExceptionHandler<GlobalExceptionHandler>();
+
+builder.WebHost.ConfigureKestrel(kestrel => kestrel
+    .Configure(builder.Configuration.GetSection("Kestrel"), reloadOnChange: true)
+    .Endpoint("grpc", endpoint => endpoint.ListenOptions.Protocols = HttpProtocols.Http2));
+
+builder.Services.AddGrpc(options =>
+{
+    options.Interceptors.Add<GrpcServerLoggingInterceptor>();
+    options.EnableDetailedErrors = builder.Environment.IsDevelopment();
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -65,6 +88,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.MapControllers();
+app.MapGrpcService<CatalogGrpcService>();
 app.MapDefaultEndpoints();
 
 app.Run();

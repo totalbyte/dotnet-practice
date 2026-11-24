@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging.Abstractions;
 using Platform.ServiceDefaults.Correlation;
-using Platform.Tests.Aggregator;
 
 namespace Platform.Tests.ServiceDefaults;
 

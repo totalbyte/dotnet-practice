@@ -1,3 +1,4 @@
+using System.Diagnostics.Metrics;
 using AutoMapper;
 using Catalog.Bll.Mapping;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -21,5 +22,14 @@ internal static class TestSupport
     {
         typeof(T).GetProperty("Id")!.SetValue(entity, id);
         return entity;
+    }
+}
+
+internal sealed class TestMeterFactory : IMeterFactory
+{
+    public Meter Create(MeterOptions options) => new(options);
+
+    public void Dispose()
+    {
     }
 }
