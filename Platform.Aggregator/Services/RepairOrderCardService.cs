@@ -5,6 +5,7 @@ using Microsoft.Extensions.Options;
 using Platform.Aggregator.Caching;
 using Platform.Aggregator.Clients;
 using Platform.Aggregator.Dtos;
+using Platform.Aggregator.Resilience;
 using Polly;
 using Repairs.Grpc;
 using Reviews.Grpc;
@@ -17,6 +18,7 @@ public sealed class RepairOrderCardService(
     ReviewsService.ReviewsServiceClient reviews,
     RepairOrderCardCache cache,
     IOptions<AggregatorOptions> options,
+    TimeProvider time,
     ILogger<RepairOrderCardService> logger)
 {
     public static readonly ActivitySource ActivitySource = new("Platform.Aggregator");
@@ -56,7 +58,7 @@ public sealed class RepairOrderCardService(
                 ? []
                 : (await catalog.GetCatalogItemsByIdsAsync(
                     new GetCatalogItemsByIdsRequest { Ids = { itemIds } },
-                    deadline: Deadline(), cancellationToken: cancellationToken)).Items.ToList(),
+                    deadline: Deadline(UpstreamPolicies.Catalog), cancellationToken: cancellationToken)).Items.ToList(),
             warnings, cancellationToken);
         var reviewsTask = CallSafelyAsync(UpstreamServices.Reviews, async () => (await reviews.GetRepairOrderReviewsAsync(
                 new GetRepairOrderReviewsRequest
@@ -66,7 +68,7 @@ public sealed class RepairOrderCardService(
                     RepairReviewsLimit = settings.RepairReviewsLimit,
                     ItemReviewsLimit = settings.ItemReviewsLimit
                 },
-                deadline: Deadline(), cancellationToken: cancellationToken)).Reviews.ToList(),
+                deadline: Deadline(UpstreamPolicies.Reviews), cancellationToken: cancellationToken)).Reviews.ToList(),
             warnings, cancellationToken);
 
         await Task.WhenAll(catalogTask, reviewsTask);
@@ -98,8 +100,6 @@ public sealed class RepairOrderCardService(
             order.Id, card.Parts.Count, card.Reviews.Count, warnings.Count);
 
         return card;
-
-        DateTime Deadline() => DateTime.UtcNow.Add(settings.CallDeadline);
     }
 
     private async Task<RepairOrderReply?> GetRepairOrderAsync(long id, CancellationToken cancellationToken)
@@ -108,7 +108,7 @@ public sealed class RepairOrderCardService(
         try
         {
             var order = await repairs.GetRepairOrderAsync(new GetRepairOrderRequest { Id = id },
-                deadline: DateTime.UtcNow.Add(options.Value.CallDeadline), cancellationToken: cancellationToken);
+                deadline: Deadline(UpstreamPolicies.Repairs), cancellationToken: cancellationToken);
             logger.LogInformation("{Service} responded in {ElapsedMs} ms", UpstreamServices.Repairs, ElapsedMs(startedAt));
             return order;
         }
@@ -148,12 +148,11 @@ public sealed class RepairOrderCardService(
         }
     }
 
-    // Unavailable and DeadlineExceeded are the transport failures of gRPC; a rejection by the
-    // HTTP resilience pipeline (open circuit, exhausted timeout) reaches the client as Internal.
     private static bool IsUnavailable(RpcException exception, CancellationToken cancellationToken)
         => exception.StatusCode switch
         {
             StatusCode.Unavailable or StatusCode.DeadlineExceeded => true,
+            StatusCode.ResourceExhausted or StatusCode.Unknown => true,
             StatusCode.Internal => exception.Status.DebugException is ExecutionRejectedException or HttpRequestException,
             StatusCode.Cancelled => !cancellationToken.IsCancellationRequested,
             _ => false
@@ -207,6 +206,8 @@ public sealed class RepairOrderCardService(
         review.Author?.DisplayName,
         review.HasCatalogItemId ? review.CatalogItemId : null,
         review.CreatedAt.ToDateTime());
+
+    private DateTime Deadline(UpstreamPolicy policy) => time.GetUtcNow().UtcDateTime.Add(policy.CallDeadline);
 
     private static long ElapsedMs(long startedAt) => (long)Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
 }

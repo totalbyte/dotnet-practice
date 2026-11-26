@@ -104,6 +104,34 @@ public sealed class RepairOrderCardServiceTests
         Assert.Equal(["catalog-api is unavailable"], card.Warnings);
     }
 
+    [Theory]
+    [InlineData(StatusCode.Unknown)]
+    [InlineData(StatusCode.ResourceExhausted)]
+    public async Task Returns_partial_card_when_a_service_fails_to_handle_the_call(StatusCode status)
+    {
+        _catalog = new((_, _) => GrpcCalls.Failure<CatalogItemsReply>(status));
+        _reviews = new((_, _) => GrpcCalls.Failure<ReviewsReply>(status));
+
+        var card = await CreateService().GetAsync(OrderId, CancellationToken.None);
+
+        Assert.NotNull(card);
+        Assert.Equal(["catalog-api is unavailable", "reviews-api is unavailable"], card.Warnings.Order());
+        Assert.Equal(2, card.Parts.Count);
+    }
+
+    [Theory]
+    [InlineData(StatusCode.Unknown)]
+    [InlineData(StatusCode.ResourceExhausted)]
+    public async Task Throws_unavailable_when_repairs_api_fails_to_handle_the_call(StatusCode status)
+    {
+        _repairs = new((_, _) => GrpcCalls.Failure<RepairOrderReply>(status));
+
+        var exception = await Assert.ThrowsAsync<UpstreamUnavailableException>(
+            () => CreateService().GetAsync(OrderId, CancellationToken.None));
+
+        Assert.Equal("repairs-api", exception.Service);
+    }
+
     [Fact]
     public async Task Returns_null_when_repair_order_does_not_exist()
     {
@@ -233,7 +261,7 @@ public sealed class RepairOrderCardServiceTests
         var cache = new RepairOrderCardCache(redis ?? _redis, new AggregatorCacheMetrics(new TestMeterFactory()),
             options, TimeProvider.System, NullLogger<RepairOrderCardCache>.Instance);
         return new RepairOrderCardService(
-            _repairs, _catalog, _reviews, cache, options, NullLogger<RepairOrderCardService>.Instance);
+            _repairs, _catalog, _reviews, cache, options, TimeProvider.System, NullLogger<RepairOrderCardService>.Instance);
     }
 
     private static RepairOrderReply Order() => new()
