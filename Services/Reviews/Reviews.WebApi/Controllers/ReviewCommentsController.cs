@@ -3,11 +3,12 @@ using Reviews.Application.Reviews.Commands.AddComment;
 using Reviews.Application.Reviews.Dtos;
 using Reviews.Application.Reviews.Queries.GetReviewComments;
 using Reviews.WebApi.Contracts;
+using Reviews.WebApi.Metrics;
 
 namespace Reviews.WebApi.Controllers;
 
 [Route("api/reviews/{reviewId}/comments")]
-public sealed class ReviewCommentsController : ApiControllerBase
+public sealed class ReviewCommentsController(ReviewMetrics metrics) : ApiControllerBase
 {
     [HttpGet]
     [ProducesResponseType<IReadOnlyList<CommentDto>>(StatusCodes.Status200OK)]
@@ -23,8 +24,9 @@ public sealed class ReviewCommentsController : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<CommentDto>> Add(string reviewId, AddCommentRequest request, CancellationToken ct)
     {
-        var comment = await Mediator.Send(
-            new AddCommentCommand(reviewId, request.AuthorName, request.Text, request.IsStaff), ct);
+        var comment = await metrics.MeasureAsync("add_comment", () => Mediator.Send(
+            new AddCommentCommand(reviewId, request.AuthorName, request.Text, request.IsStaff), ct));
+        metrics.CommentAdded(request.IsStaff);
 
         return CreatedAtAction(nameof(GetList), new { reviewId }, comment);
     }

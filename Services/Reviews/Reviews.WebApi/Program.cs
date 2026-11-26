@@ -10,6 +10,8 @@ using Reviews.Infrastructure;
 using Reviews.Infrastructure.Persistence;
 using Reviews.WebApi.ExceptionHandling;
 using Reviews.WebApi.Grpc;
+using Reviews.WebApi.HealthChecks;
+using Reviews.WebApi.Metrics;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -23,6 +25,10 @@ builder.Services
 
 if (!string.IsNullOrWhiteSpace(connectionString))
     builder.Services.PostConfigure<MongoDbOptions>(options => options.ConnectionString = connectionString);
+
+builder.Services.AddReviewMetrics();
+
+builder.Services.AddReviewsHealthChecks();
 
 builder.Services.AddAutoMapper(cfg =>
 {
@@ -46,6 +52,8 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel
 builder.Services
     .AddGrpc(options => options.EnableDetailedErrors = builder.Environment.IsDevelopment())
     .AddServerLogging();
+builder.Services.AddGrpcHealthChecks(options =>
+    options.Services.Map(string.Empty, check => check.Tags.Contains(Extensions.ReadyTag)));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -63,6 +71,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapControllers();
 app.MapGrpcService<ReviewsGrpcService>();
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 
 app.Run();

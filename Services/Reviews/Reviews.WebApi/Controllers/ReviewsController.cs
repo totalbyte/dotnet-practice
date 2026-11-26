@@ -9,11 +9,12 @@ using Reviews.Application.Reviews.Queries.GetReviewById;
 using Reviews.Application.Reviews.Queries.GetReviewsFeed;
 using Reviews.Application.Reviews.Queries.GetReviewsList;
 using Reviews.WebApi.Contracts;
+using Reviews.WebApi.Metrics;
 
 namespace Reviews.WebApi.Controllers;
 
 [Route("api/reviews")]
-public sealed class ReviewsController : ApiControllerBase
+public sealed class ReviewsController(ReviewMetrics metrics) : ApiControllerBase
 {
     [HttpGet]
     [ProducesResponseType<PagedResult<ReviewSummaryDto>>(StatusCodes.Status200OK)]
@@ -46,7 +47,8 @@ public sealed class ReviewsController : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<CreatedReviewResponse>> Create(CreateReviewCommand command, CancellationToken ct)
     {
-        var id = await Mediator.Send(command, ct);
+        var id = await metrics.MeasureAsync("create", () => Mediator.Send(command, ct));
+        metrics.ReviewCreated(command.ReviewType?.ToString() ?? "unknown", command.Rating);
         SetETag(1);
         return CreatedAtAction(nameof(GetById), new { id }, new CreatedReviewResponse(id));
     }
@@ -89,7 +91,9 @@ public sealed class ReviewsController : ApiControllerBase
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ReviewDto>> Reply(string id, StaffReplyRequest request, CancellationToken ct)
     {
-        var review = await Mediator.Send(new ReplyToReviewCommand(id, request.AuthorName, request.Text), ct);
+        var review = await metrics.MeasureAsync("reply",
+            () => Mediator.Send(new ReplyToReviewCommand(id, request.AuthorName, request.Text), ct));
+        metrics.ReviewReplied();
         SetETag(review.Version);
         return Ok(review);
     }
