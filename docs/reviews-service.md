@@ -232,7 +232,7 @@ flowchart LR
 підключення з паролем передається змінною `ConnectionStrings__ReviewsDb` — в Aspire це робить
 AppHost через `WithReference`; якщо такого рядка немає, використовується резервний
 `MongoDb:ConnectionString`. Драйвер підписано на трасування (`DiagnosticsActivityEventSubscriber`),
-тож кожна команда MongoDB — окремий span. Стан підключення показує `GET /health` (перевірка `mongodb`).
+тож кожна команда MongoDB — окремий span. Стан підключення показує `GET /health/ready` (перевірка `reviews-db`, команда `{ ping: 1 }`).
 
 Ключ ліцензії MediatR і AutoMapper (Lucky Penny Software) читається з `LuckyPenny:LicenseKey`
 (user-secrets або змінна `LuckyPenny__LicenseKey`; в Aspire її задає AppHost із параметра-секрету

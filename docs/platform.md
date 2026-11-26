@@ -1,4 +1,4 @@
-# Платформа: AppHost, ServiceDefaults, Gateway, gRPC, Aggregator
+# Платформа: AppHost, ServiceDefaults, Gateway, gRPC, Aggregator, стійкість
 
 Три сервіси (Repairs, Catalog, Reviews) працюють як одна платформа на .NET Aspire. Клієнт звертається
 лише до шлюзу (REST), шлюз маршрутизує запити за логічними іменами сервісів, а агрегатор збирає
@@ -8,9 +8,9 @@
 | Компонент | Проєкт | Ресурс AppHost | Роль |
 |-----------|--------|----------------|------|
 | AppHost | `Platform.AppHost` | — | запускає контейнери баз і Redis, сервіси, агрегатор і шлюз; задає порядок старту й service discovery |
-| ServiceDefaults | `Platform.ServiceDefaults` | — | спільна бібліотека: Serilog, OpenTelemetry, health checks, service discovery, resilience, CorrelationId, gRPC-interceptor |
+| ServiceDefaults | `Platform.ServiceDefaults` | — | спільна бібліотека: Serilog, OpenTelemetry, health checks (`/health/live`, `/health/ready`), service discovery, resilience, CorrelationId, gRPC-interceptor, знімки для gauge |
 | Gateway | `Platform.ApiGateway` | `gateway` | єдина точка входу на YARP: маршрути, CorrelationId, журнал і метрики трафіку |
-| Aggregator | `Platform.Aggregator` | `aggregator` | Aggregator Pattern: картка замовлення з паралельних gRPC-викликів до трьох сервісів, кеш картки в Redis |
+| Aggregator | `Platform.Aggregator` | `aggregator` | Aggregator Pattern: картка замовлення з паралельних gRPC-викликів до трьох сервісів, політики стійкості для кожного сервісу, кеш картки в Redis |
 | Repairs | `Services/Repairs/Repairs.Api` | `repairs-api` | замовлення, клієнти, склад; SQL Server `RepairsDb`; REST + gRPC |
 | Catalog | `Services/Catalog/Catalog.Api` | `catalog-api` | позиції каталогу, бренди, категорії; SQL Server `CatalogDb`; REST + gRPC; дворівневий кеш |
 | Reviews | `Services/Reviews/Reviews.WebApi` | `reviews-api` | відгуки й коментарі; MongoDB `ReviewsDb`; REST + gRPC |
@@ -113,13 +113,14 @@ flowchart LR
 
 ### OpenTelemetry
 
-- Трасування: ASP.NET Core (вхідні запити, без `/health` і `/alive`), HttpClient (вихідні виклики),
+- Трасування: ASP.NET Core (вхідні запити, без `/health/*`), HttpClient (вихідні виклики),
   SqlClient (покриває і Dapper у Repairs, і EF Core у Catalog), MongoDB
   (`MongoDB.Driver.Core.Extensions.DiagnosticSources`), власні `ActivitySource`: ім'я застосунку й
   усі джерела з тим самим префіксом (`Repairs.*`, `Catalog.*`, `Reviews.*`, `Platform.*`).
-- Метрики: ASP.NET Core, HttpClient, runtime, власний `Meter` застосунку (метрики шлюзу) і `Meter`
-  кешу `<префікс>.Cache` — `Catalog.Cache` у catalog-api, `Platform.Cache` в агрегаторі
-  (`cache.hits` / `cache.misses` з тегом `cache.level`).
+- Метрики: ASP.NET Core, HttpClient, runtime, власний `Meter` застосунку (метрики шлюзу), бізнес-метрики
+  сервісів (`Repairs.Api`, `Catalog.Api`, `Reviews.WebApi`), `Meter` кешу `<префікс>.Cache` —
+  `Catalog.Cache` у catalog-api, `Platform.Cache` в агрегаторі (`cache.hits` / `cache.misses` з тегом
+  `cache.level`) — і `Polly` (події та тривалість стратегій стійкості).
 - gRPC окремої інструментації не потребує: клієнтські виклики йдуть через `HttpClient` (span
   `HTTP POST` в агрегаторі), серверні — через ASP.NET Core (span `POST /catalog.CatalogService/...`
   виду Server з атрибутами `grpc.method`, `grpc.status_code`, `network.protocol.version` = `2` і
@@ -133,11 +134,20 @@ flowchart LR
 
 ### Health checks, service discovery, resilience
 
-- `MapDefaultEndpoints()` відкриває `/health` (усі перевірки) і `/alive` (лише `live`) у Development.
-- Усі `HttpClient` отримують service discovery, стандартний resilience-handler і
-  `CorrelationIdHandler`. Таймаути resilience-handler можна перевизначити розділом
-  `HttpClientResilience` конфігурації — так зроблено в агрегаторі. gRPC-клієнти створюються тією самою
-  фабрикою `HttpClient`, тож усе це діє і для них.
+- `MapDefaultEndpoints()` відкриває в усіх середовищах `/health/live` (лише перевірка `self` з тегом
+  `live`), `/health/ready` (перевірки з тегом `ready`) і `/health` (усі). Усі три відповідають JSON
+  з деталями кожної перевірки (`HealthChecks/HealthReportJsonWriter`): статус, опис, тривалість, теги
+  і тип помилки без її тексту. Константи шляхів і тегів (`Extensions.ReadyTag`) спільні для сервісів.
+- `HealthChecks/RedisCacheHealthCheck` перевіряє Redis для catalog-api й агрегатора. Відключений
+  `IConnectionMultiplexer` одразу дає статус збою реєстрації (Degraded), підключений має відповісти на
+  `PING` у межах таймауту.
+- Усі `HttpClient` отримують service discovery, `CorrelationIdHandler` і стандартний resilience-handler,
+  у якому повтори небезпечних методів вимкнено (`Retry.DisableForUnsafeHttpMethods()`). Параметри
+  стандартного обробника можна перевизначити розділом `HttpClientResilience` конфігурації.
+  gRPC-клієнти створює та сама фабрика `HttpClient`; агрегатор замінює для них стандартний обробник
+  власним (див. [Стійкість, метрики й health checks](#стійкість-метрики-й-health-checks)).
+- `Metrics/MetricsSnapshotService` — базова фонова служба, яка раз на 30 с готує значення для
+  `ObservableGauge`. Її запити виконуються в `SuppressInstrumentationScope`, тож не з'являються в traces.
 
 ### gRPC-interceptor
 
@@ -268,15 +278,17 @@ Repairs, актуальні дані позицій з Catalog і відгуки
 0. `RepairOrderCardCache` перевіряє Redis **до** будь-яких викликів: ключ
    `aggregator:repair-order:{id}:card`. Попадання повертається одразу (у trace лише `HMGET` Redis).
 1. `RepairsService.GetRepairOrder` повертає замовлення. Без замовлення агрегувати нічого:
-   `NotFound` → 404, `Unavailable`/`DeadlineExceeded` → 503 `ProblemDetails`.
+   `NotFound` → 404; `Unavailable`, `DeadlineExceeded`, `ResourceExhausted` чи `Unknown` → 503
+   `ProblemDetails`.
 2. `CatalogService.GetCatalogItemsByIds` і `ReviewsService.GetRepairOrderReviews` виконуються
-   одночасно через `Task.WhenAll`. Кожен виклик отримує `CancellationToken` клієнта й deadline
-   (`Aggregator:CallDeadline`, 8 с).
+   одночасно через `Task.WhenAll`. Кожен виклик отримує `CancellationToken` клієнта й deadline зі
+   своєї політики (`Resilience/UpstreamPolicies.cs`: Repairs — 11 с, Catalog — 8 с, Reviews — 6 с).
 3. Кожен виклик логується (`catalog-api responded in 12 ms`). Якщо сервіс недоступний —
    `RpcException` зі статусом `Unavailable` чи `DeadlineExceeded` (або `Internal`, коли виклик
-   відхилив resilience-handler: відкритий circuit breaker, вичерпаний таймаут), — картка
-   повертається без його даних, а в `warnings` з'являється `catalog-api is unavailable`. Скасування
-   запиту клієнтом не вважається відмовою сервісу й не ховається.
+   відхилив resilience-handler: відкритий circuit breaker, вичерпаний таймаут) — або не зміг обробити
+   виклик (`Unknown` після непередбаченого винятку, наприклад без бази, чи `ResourceExhausted`), —
+   картка повертається без його даних, а в `warnings` з'являється `catalog-api is unavailable`.
+   Скасування запиту клієнтом не вважається відмовою сервісу й не ховається.
 4. У картку потрапляють лише дані цього замовлення: позиції каталогу з тими самими Id і відгуки про
    це замовлення або його позиції. Позиція, якої немає в каталозі, дає попередження.
 5. Повна картка кешується в Redis на 30 с (`Aggregator:CardCacheTimeToLive`, перевірка під час
@@ -284,13 +296,13 @@ Repairs, актуальні дані позицій з Catalog і відгуки
    ще 30 с після відновлення сервісу. Якщо Redis недоступний, агрегатор на 30 с припиняє до нього
    звертатися і збирає картки з сервісів.
 
-Типізовані gRPC-клієнти зареєстровано через `AddGrpcClient<...Client>` з адресами за логічними
-іменами — `http://_grpc.repairs-api`, `http://_grpc.catalog-api`, `http://_grpc.reviews-api`
-(`Clients/UpstreamServices.cs`). Service discovery, resilience-handler і `CorrelationIdHandler` з
-ServiceDefaults діють і для них. Таймаути resilience-handler для агрегатора менші за стандартні
-(`HttpClientResilience` в `appsettings.json`: спроба — 5 с, один повтор, увесь запит — 10 с), а
-deadline виклику — 8 с, щоб недоступний сервіс давав часткову відповідь раніше, ніж спрацює таймаут
-шлюзу (30 с).
+Типізовані gRPC-клієнти зареєстровано методом `AddUpstreamGrpcClient<...Client>(policy)`
+(`Resilience/UpstreamClientRegistration.cs`) як іменовані клієнти з адресами за логічними іменами —
+`http://_grpc.repairs-api`, `http://_grpc.catalog-api`, `http://_grpc.reviews-api`
+(`Clients/UpstreamServices.cs`). Service discovery і `CorrelationIdHandler` з ServiceDefaults діють і
+для них, а стандартний resilience-handler замінено власним для кожного сервісу. Дедлайни й таймаути
+підібрано так, щоб недоступний сервіс давав часткову відповідь раніше, ніж спрацює таймаут шлюзу
+(30 с).
 
 TTL картки (30 с) коротший за L1-кеш Catalog (2 хв): агрегована відповідь не може виглядати
 «свіжішою», ніж дані, з яких її зібрано. Інвалідацію між сервісами не реалізовано — після зміни ціни
@@ -388,7 +400,68 @@ JSON у camelCase, `null`-значення не серіалізуються. Д
   ![Structured logs, відфільтровані за одним CorrelationId: gateway, aggregator, catalog-api, reviews-api, записи gRPC і кешу](img/grpc-logs-correlation.png)
 
 - **Metrics** — `http.server.request.duration` кожного сервісу, метрики шлюзу `gateway.*`, кешу
-  `Catalog.Cache` і `Platform.Cache` (`cache.hits`, `cache.misses` з тегом `cache.level`).
+  `Catalog.Cache` і `Platform.Cache` (`cache.hits`, `cache.misses` з тегом `cache.level`), бізнес-метрики
+  `Repairs.Api`, `Catalog.Api`, `Reviews.WebApi` і `Polly` в агрегаторі
+  (`resilience.polly.strategy.events` з тегами `event.name` і `pipeline.name`).
+
+- **Resources** — стан кожного ресурсу за `/health/ready` (`WithHttpHealthCheck`) і кількість помилок у
+  журналі; клік на ресурс показує його health checks.
 
 Запит напряму до сервісу (наприклад, `http://localhost:5077/api/repair-orders/1`) теж отримує
 `X-Correlation-Id`, але сервіс створює його сам, і в журналі немає записів шлюзу про маршрутизацію.
+
+## Стійкість, метрики й health checks
+
+Значення політик і їхнє обґрунтування, перелік метрик і перевірок та результати сценаріїв збоїв
+зібрано в [README](../README.md#стійкість-метрики-й-health-checks). Тут описано, як це влаштовано в
+коді.
+
+**Політики агрегатора.** `Resilience/UpstreamPolicy` описує політику одного сервісу: критичність,
+дедлайн gRPC-виклику, таймаути спроби й HTTP-конвеєра, повтори (gRPC `RetryPolicy` або HTTP-повтор,
+але не обидва) і параметри circuit breaker. `UpstreamPolicies` містить три екземпляри. `Validate()`
+перевіряє узгодженість: повтори не поєднуються, загальний таймаут вміщує всі спроби, дедлайн довший
+за конвеєр і вміщує другу повну спробу gRPC після таймауту, вікно вибірки щонайменше вдвічі більше за
+таймаут спроби. З неузгодженою політикою агрегатор не стартує.
+
+`UpstreamClientRegistration.AddUpstreamGrpcClient` реєструє іменований gRPC-клієнт і задає
+`ServiceConfig` з `RetryPolicy`. Потім прибирає стандартний обробник (`RemoveAllResilienceHandlers()`)
+і додає власний через `AddStandardResilienceHandler().Configure(...)` з журналюванням `OnOpened`,
+`OnHalfOpened` і `OnClosed`. API `RemoveAllResilienceHandlers()` позначено експериментальним, тому
+діагностику `EXTEXP0001` вимкнено в `Platform.Aggregator.csproj`.
+
+Чому повтори не поєднуються: з `RetryPolicy` gRPC-клієнт буферизує повідомлення й сам керує
+повторами, а HTTP-повтор того самого `HttpRequestMessage` надсилає вміст повторно, і сервер отримує
+неповне повідомлення (`Internal: Incomplete message`). Перевірено на сервері gRPC Health, який перший
+запит відхиляв відповіддю HTTP 503 або затримував довше за таймаут спроби. Без `RetryPolicy`
+HTTP-повтор відновлює виклик, з нею — ламає. Статус `Unavailable` у трейлерах HTTP-обробник не бачить,
+а `RetryPolicy` успішно його повторює.
+
+Помилки HTTP-конвеєра (таймаут спроби, розімкнений ланцюг) доходять до gRPC-клієнта як статус
+`Internal` з `DebugException` типу `ExecutionRejectedException`. Такий виклик агрегатор вважає
+недоступним сервісом, як і `Unavailable` та `DeadlineExceeded`. `RetryPolicy` статус `Internal` не
+повторює, тому для клієнтів із нею перед resilience-handler додано `AttemptTimeoutHandler`: він замінює
+`TimeoutRejectedException` на `HttpRequestException` із вкладеним `IOException`, і клієнт отримує
+`Unavailable`. Сам `HttpRequestException` без `IOException` усередині лишається для нього `Internal`.
+Відмова розімкненого ланцюга не замінюється й не повторюється.
+
+**Health checks.** Реєстрація перевірок кожного сервісу лежить у `<Сервіс>.Api/HealthChecks/`
+(`AddRepairsHealthChecks`, `AddCatalogHealthChecks`, `AddReviewsHealthChecks`), агрегатора — у
+`Platform.Aggregator/HealthChecks/`. Пакет `AspNetCore.HealthChecks.SqlServer` виконує `SELECT 1;`, а
+`AspNetCore.HealthChecks.MongoDb` з іменем бази виконує `{ ping: 1 }`. gRPC Health
+(`Grpc.AspNetCore.HealthChecks`) відповідає на кожен `Check` за поточним станом перевірок тегу
+`ready`, без кешування результату. `DownstreamGrpcHealthCheck` агрегатора використовує іменовані
+клієнти `Health.HealthClient` (`<сервіс>-health`) без resilience-handler: перевірка має відповісти
+швидко й не повторюватися.
+
+**Бізнес-метрики.** Класи `RepairOrderMetrics`, `CatalogMetrics` і `ReviewMetrics` у
+`<Сервіс>.Api/Metrics/` створюють інструменти в конструкторі через `IMeterFactory`, тож Meter живе
+стільки ж, скільки контейнер DI. `MeasureAsync(operation, action)` міряє тривалість через
+`Stopwatch` і записує її з `status = success` після результату або з `status = failure` у `catch`
+перед повторним киданням винятку. Контролери збільшують лічильник після успішної операції. Знімки
+для gauge:
+
+- `OpenRepairOrdersSnapshot` рахує замовлення за статусами наявним пошуком замовлень із
+  `PageSize = 1`, без нових процедур;
+- `ActiveCatalogItemsSnapshot` читає через некешований `CatalogItemService`, щоб не спотворювати
+  метрики кешу;
+- `PublishedReviewsSnapshot` читає через `IReviewQueries`, оминаючи журналювання MediatR.

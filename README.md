@@ -8,6 +8,8 @@ Entity Framework Core (Code First, міграції), сервіс **Reviews** �
 запускаються однією командою через .NET Aspire; логи, трасування й метрики всіх компонентів видно в
 Aspire Dashboard. Зовнішні клієнти працюють із REST через шлюз, а агрегатор звертається до сервісів
 через gRPC. Довідникові дані Catalog кешуються у два рівні: у пам'яті процесу та в Redis.
+Агрегатор має окремі політики стійкості (повтори, circuit breaker, таймаути) для кожного сервісу, а
+кожен сервіс — бізнес-метрики та endpoints liveness і readiness.
 
 ## Зміст
 
@@ -17,16 +19,17 @@ Aspire Dashboard. Зовнішні клієнти працюють із REST ч�
 4. [Запуск платформи через Aspire](#запуск-платформи-через-aspire)
 5. [Gateway, Aggregator і спостережуваність](#gateway-aggregator-і-спостережуваність)
 6. [gRPC і кешування](#grpc-і-кешування)
-7. [Схема рішення](#схема-рішення)
-8. [API сервісу Repairs](#api-сервісу-repairs)
-9. [Сервіс Catalog](#сервіс-catalog)
-10. [Сервіс Reviews](#сервіс-reviews)
-11. [ERD-діаграми](#erd-діаграми)
-12. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
-13. [Розгортання баз даних](#розгортання-баз-даних)
-14. [Перевірка після розгортання](#перевірка-після-розгортання)
-15. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
-16. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
+7. [Стійкість, метрики й health checks](#стійкість-метрики-й-health-checks)
+8. [Схема рішення](#схема-рішення)
+9. [API сервісу Repairs](#api-сервісу-repairs)
+10. [Сервіс Catalog](#сервіс-catalog)
+11. [Сервіс Reviews](#сервіс-reviews)
+12. [ERD-діаграми](#erd-діаграми)
+13. [Таблиця політики дублювання даних](#таблиця-політики-дублювання-даних)
+14. [Розгортання баз даних](#розгортання-баз-даних)
+15. [Перевірка після розгортання](#перевірка-після-розгортання)
+16. [Збережувані процедури Проєкту №1](#збережувані-процедури-проєкту-1)
+17. [Безпека та зміни схеми](#безпека-та-зміни-схеми)
 
 ## Предметна область
 
@@ -77,19 +80,19 @@ flowchart LR
 README.md                 опис домену, запуск, API, розгортання БД, таблиця дублювання, ERD
 Platform.slnx             рішення з усіма проєктами платформи
 Platform.AppHost/         оркестрація .NET Aspire (AppHost.cs): SQL Server, MongoDB, Redis, бази, сервіси, агрегатор і шлюз
-Platform.ServiceDefaults/ спільні налаштування (Extensions.cs): Serilog, OpenTelemetry, health checks, resilience, Correlation/, Grpc/ (interceptor)
+Platform.ServiceDefaults/ спільні налаштування (Extensions.cs): Serilog, OpenTelemetry, resilience, /health/live і /health/ready, Correlation/, Grpc/ (interceptor), HealthChecks/, Metrics/
 Platform.ApiGateway/      API-шлюз на YARP: маршрути в appsettings.json, журнал і метрики трафіку (Logging/)
-Platform.Aggregator/      агрегатор: gRPC-клієнти (Clients/), кеш картки в Redis (Caching/), картка замовлення (Services/, Dtos/), контролер
-Platform.Tests/           модульні тести агрегатора, gRPC-interceptor і CorrelationId
+Platform.Aggregator/      агрегатор: gRPC-клієнти (Clients/), політики стійкості (Resilience/), перевірки сервісів (HealthChecks/), кеш картки в Redis (Caching/), картка замовлення (Services/, Dtos/), контролер
+Platform.Tests/           модульні тести агрегатора, політик стійкості, health checks, gRPC-interceptor і CorrelationId
 Services/
 ├── Repairs/              сервіс контексту Repairs — ADO.NET + Dapper
-│   ├── Repairs.Api/      контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), обробник помилок, Program.cs
+│   ├── Repairs.Api/      контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), Metrics/, HealthChecks/, обробник помилок, Program.cs
 │   ├── Repairs.Bll/      сервіси, DTO, профілі AutoMapper, валідація, Diagnostics/
 │   ├── Repairs.Dal/      інтерфейси й реалізації репозиторіїв, Unit of Work
 │   ├── Repairs.Domain/   моделі, константи, доменні винятки
 │   └── Repairs.Tests/    модульні тести
 ├── Catalog/              сервіс контексту Catalog — EF Core
-│   ├── Catalog.Api/      контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), обробник помилок, Program.cs
+│   ├── Catalog.Api/      контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), Metrics/, HealthChecks/, обробник помилок, Program.cs
 │   ├── Catalog.Bll/      сервіси, Caching/ (кеш L1 + L2), DTO, профілі AutoMapper, специфікації, валідатори, Diagnostics/
 │   ├── Catalog.Dal/      DbContext, Configurations/, Migrations/, репозиторії, Unit of Work, Seeding/
 │   ├── Catalog.Domain/   сутності з бізнес-правилами, доменні винятки
@@ -98,7 +101,7 @@ Services/
     ├── Reviews.Domain/          сутності, value objects, доменні винятки, інтерфейс репозиторію
     ├── Reviews.Application/     команди й запити MediatR, обробники, behaviors, валідатори, DTO, AutoMapper, Diagnostics
     ├── Reviews.Infrastructure/  Mongo-контекст, BSON-мапінг, репозиторій, запити читання, сідінг, індекси
-    ├── Reviews.WebApi/          контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), обробник помилок, Program.cs
+    ├── Reviews.WebApi/          контролери, Protos/ (gRPC-контракт), Grpc/ (gRPC-сервіс), Metrics/, HealthChecks/, обробник помилок, Program.cs
     └── Reviews.Tests/           модульні тести
 docker-compose.yml        SQL Server 2025 + MongoDB 9.0 та автоматичний запуск скриптів
 .env.example              шаблон паролів (.env у git не потрапляє)
@@ -115,7 +118,7 @@ docs/
 ├── erd-p2.md             ERD Проєкту №2: зв'язки, обмеження, індекси
 ├── p3-mongo-model.md     модель MongoDB: вбудовування, посилання, гібрид
 ├── p3-documents/         приклади документів MongoDB у форматі JSON
-└── img/                  зображення ERD, знімки Swagger, Aspire Dashboard, trace і логів
+└── img/                  зображення ERD, знімки Swagger, Aspire Dashboard, trace, логів, метрик і health checks
 db/
 ├── p1/                   Проєкт №1 — RepairsDb
 │   ├── schema.sql        таблиці, ключі, обмеження, індекси, view, роль застосунку
@@ -181,6 +184,7 @@ dotnet run --project Platform.AppHost
 | Catalog — Swagger UI | `http://localhost:5078/swagger` |
 | Reviews — Swagger UI | `http://localhost:5079/swagger` |
 | Aggregator — Swagger UI | `http://localhost:5080/swagger` |
+| Health checks сервісу | `http://localhost:<порт REST>/health/live`, `/health/ready` |
 | Aspire Dashboard | посилання з консолі (`https://localhost:17028/login?t=...`) |
 
 ![Swagger UI з переліком ендпоінтів](docs/img/swagger.jpeg)
@@ -294,7 +298,8 @@ curl -i http://localhost:5000/api/aggregator/repair-orders/1/full
 ціною й ознакою `priceChanged`), `reviews` і `warnings`. Якщо зупинити `reviews-api` у Dashboard,
 той самий запит повертає 200 із замовленням і позиціями, без відгуків, і з
 `"warnings": ["reviews-api is unavailable"]` (таку часткову картку агрегатор не кешує). Неіснуюче
-замовлення — 404, недоступний `repairs-api` — 503 у форматі `ProblemDetails`.
+замовлення — 404, а `repairs-api`, який недоступний або не зміг обробити виклик (наприклад, без бази),
+— 503 у форматі `ProblemDetails`.
 
 Усі застосунки підключають `Platform.ServiceDefaults`: Serilog пише JSON у консоль і передає кожен
 запис в OpenTelemetry, тож у вкладці *Structured logs* видно атрибути `ServiceName`, `CorrelationId`,
@@ -325,7 +330,8 @@ curl -i http://localhost:5000/api/aggregator/repair-orders/1/full
 - gRPC працює на окремому endpoint лише з HTTP/2 (порти 5177–5179), REST — на звичному HTTP/1.1.
 - `GrpcServerLoggingInterceptor` з ServiceDefaults пише метод, peer, статус і тривалість кожного виклику.
 - Агрегатор робить 3 gRPC-виклики замість колишніх `1 + N + (N + 1)` HTTP-запитів, другий і третій —
-  паралельно; недоступний сервіс (`Unavailable`, `DeadlineExceeded`) дає попередження замість помилки.
+  паралельно; сервіс, який недоступний або не зміг обробити виклик (`Unavailable`, `DeadlineExceeded`,
+  `ResourceExhausted`, `Unknown`), дає попередження замість помилки.
 
 **Кеш Catalog** — дворівневий, у `Catalog.Bll/Caching/`: L1 — `IMemoryCache` з обмеженням розміру,
 sliding і absolute expiration; L2 — Redis через `IDistributedCache` (Aspire-інтеграція
@@ -382,6 +388,240 @@ reason "CatalogItemPriceChanged"`, потім промах L1 і L2 та SQL-з�
 шляху не викликаються), а HTTP-версію виміряно без кешів.
 
 ![HTTP: окремі GET до catalog-api на кожну позицію і до reviews-api — 33 spans](docs/img/aggregator-http-trace.png)
+
+## Стійкість, метрики й health checks
+
+Агрегатор переживає тимчасові збої сервісів завдяки повторам, а систематичні збої розмикають circuit
+breaker, і запити відхиляються одразу. Без Redis сервіси працюють з базою даних. Кожен сервіс
+публікує бізнес-метрики й має окремі endpoints liveness і readiness, а Dashboard показує стан усіх
+ресурсів. Докладно про реалізацію — [`docs/platform.md`](docs/platform.md#стійкість-метрики-й-health-checks).
+
+### Стійкість агрегатора
+
+ServiceDefaults додає кожному `HttpClient` стандартний обробник стійкості
+(`AddStandardResilienceHandler` у `ConfigureHttpClientDefaults`). Від зовнішньої до внутрішньої в ньому
+працюють rate limiter, загальний таймаут, retry, circuit breaker і таймаут спроби, а повтори небезпечних
+методів вимкнено (`Retry.DisableForUnsafeHttpMethods()`). gRPC-клієнти агрегатора створює та сама
+фабрика. Для них стандартний обробник прибирається (`RemoveAllResilienceHandlers()`) і замінюється
+власним із параметрами з `Platform.Aggregator/Resilience/UpstreamPolicies.cs`, тож обробники не
+нашаровуються.
+
+**Повтори HTTP і gRPC на одному каналі не поєднуються.** Помилки gRPC (`Unavailable`,
+`DeadlineExceeded`) приходять статусом у трейлерах відповіді з HTTP 200, тому HTTP-обробник їх не
+повторює. Для повторів за gRPC-статусами є `RetryPolicy` у `ServiceConfig` каналу. Перевірка показала,
+що з `RetryPolicy` повтор HTTP-обробника (після 503 або таймауту спроби) ламає виклик. gRPC-клієнт
+буферизує повідомлення для власних повторів, і повторно надісланий запит сервер отримує неповним
+(`Internal: Incomplete message`). Без `RetryPolicy` HTTP-повтор працює. Тому кожен клієнт має рівно
+один механізм повторів:
+
+- `repairs-api` і `catalog-api` повторюють через `RetryPolicy` за статусами `Unavailable` і
+  `ResourceExhausted`. HTTP-повтори для них вимкнено (`DisableForUnsafeHttpMethods()`), бо кожен
+  gRPC-виклик є HTTP POST.
+- `reviews-api` має один HTTP-повтор Polly з експоненційною затримкою і jitter. Повтори PUT, PATCH і
+  DELETE лишаються вимкненими, а POST дозволено, бо агрегатор лише читає.
+
+**Таймаут спроби теж повторюється.** Сам по собі він доходить до gRPC-клієнта як `Internal`, і
+`RetryPolicy` такий виклик не повторила б. Тому в `repairs-api` і `catalog-api` перед resilience-handler
+стоїть `Resilience/AttemptTimeoutHandler`: він віддає таймаут як помилку вводу-виводу, яку клієнт читає
+як `Unavailable`. Повтори gRPC Polly не рахує: у метриці `OnRetry` видно лише `reviews-api`, а повторну
+спробу критичного сервісу — за ще одним записом `Execution attempt` і подією `OnTimeout` перед ним.
+
+| Параметр | `repairs-api` | `catalog-api` | `reviews-api` |
+|----------|---------------|---------------|---------------|
+| Критичність | критичний: без замовлення картки немає (503) | критичний: без позицій картка неповна | некритичний: без відгуків картка часткова |
+| Повтори | gRPC: 4 спроби, пауза 0,5 → 4 с, множник 2 | gRPC: 5 спроб, пауза 0,2 → 2 с, множник 2 | HTTP: 1 повтор, 200 мс, експоненційно, jitter |
+| Таймаут спроби | 5 с | 3 с | 2 с |
+| Загальний таймаут HTTP | 6 с | 4 с | 5 с |
+| Дедлайн gRPC-виклику | 11 с | 8 с | 6 с |
+| `FailureRatio` | 0,3 | 0,3 | 0,7 |
+| `MinimumThroughput` | 5 | 5 | 5 |
+| `SamplingDuration` | 30 с | 30 с | 30 с |
+| `BreakDuration` | 10 с | 15 с | 15 с |
+
+Чому саме такі значення:
+
+- **Repairs.** Таймаут спроби 5 с, бо холодний старт repairs-api (перше з'єднання з SQL Server)
+  займав понад 2 с, і менший таймаут обривав перший запит. Довші паузи між повторами gRPC дають сервісу
+  піднятися після перезапуску. Ланцюг розмикається лише на 10 с: без Repairs агрегатор однаково
+  повертає 503, тож пробний запит варто робити частіше.
+- **Catalog.** Читання позицій дешеве (кеш L1 і L2), тому спроб більше, а паузи коротші. Таймаут
+  спроби 3 с має запас і над звичайною тривалістю виклику (десятки мілісекунд), і над першим зверненням
+  без Redis (близько 1 с, див. нижче).
+- **Reviews.** Клієнт швидко здається: спроба 2 с, один повтор, разом не більше 5 с, після чого
+  повертається часткова картка. Breaker толерантніший (0,7), бо збій відгуків не ламає картку. Після
+  розмикання запити вже не чекають таймауту.
+- **Спільне.** `MinimumThroughput` 5, бо на стенді мало запитів, і зі стандартними 100 breaker не
+  спрацював би. Нижчий `FailureRatio` критичних сервісів розмикає ланцюг раніше, щоб користувач не
+  чекав серію таймаутів. `SamplingDuration` щонайменше вдвічі більший за таймаут спроби, цього
+  вимагає валідація налаштувань.
+- **Узгодженість таймаутів.** Загальний HTTP-таймаут не менший за «спроба × (повтори + 1)». Дедлайн
+  gRPC — спільний бюджет усіх спроб `RetryPolicy`. Кількість спроб — верхня межа: після швидких відмов
+  (`Unavailable`) вміщуються всі, а після зависань — стільки, скільки дозволяє дедлайн, але щонайменше
+  дві (repairs: 2 × 5 с у межах 11 с; catalog: 3 с + 3 с і початок третьої в межах 8 с). Найгірший час
+  картки — 11 с (Repairs) + max(8, 6) с = 19 с, що менше за 30 с таймауту шлюзу. Ці правила перевіряє
+  `UpstreamPolicy.Validate()` під час старту агрегатора, а також тести `UpstreamPoliciesTests`.
+
+Circuit breaker бачить лише те, що доходить до HTTP-рівня: мережеві помилки, таймаути спроб і 5xx.
+gRPC-статус у трейлерах (HTTP 200) для нього є успіхом. Переходи ланцюга агрегатор пише в журнал
+категорії `Platform.Aggregator.Resilience`: розмикання з рівнем Error і причиною, half-open і
+закриття з рівнем Information. Polly публікує власні записи (категорія `Polly`) і метрики (Meter
+`Polly`, підключено в ServiceDefaults): `resilience.polly.strategy.events` з тегами `event.name` і
+`pipeline.name` (`repairs-api-standard`, `catalog-api-standard`, `reviews-api-standard`).
+
+Перевірка зупинкою `reviews-api` у Dashboard (проксі Aspire при цьому не відмовляє, а тримає
+з'єднання):
+
+1. Перші картки приходять зі статусом 200 і `"warnings": ["reviews-api is unavailable"]` за 4,2 с:
+   спроба 2 с, повтор, ще одна спроба 2 с.
+2. Після п'ятої невдалої спроби ланцюг розмикається (`OnCircuitOpened`). Наступні картки приходять за
+   15–30 мс, без звернення до reviews-api.
+3. Через 15 с пробний запит (half-open) знову чекає 2 с і розмикає ланцюг. Після запуску reviews-api
+   пробний запит проходить, ланцюг закривається (`OnCircuitClosed`), і картки знову повні.
+
+![Метрика resilience.polly.strategy.events агрегатора з фільтром event.name = OnRetry, OnCircuitOpened: 4 події](docs/img/resilience-polly-events.png)
+
+![Та сама метрика з фільтром pipeline.name = reviews-api-standard](docs/img/resilience-polly-pipeline.png)
+
+![Structured logs агрегатора: circuit breaker reviews-api розімкнувся, перейшов у half-open і закрився](docs/img/resilience-circuit-logs.png)
+
+Перевірка критичних сервісів (процес призупинено, тому виклик зависає):
+
+- `catalog-api` або `repairs-api` оживає, поки триває запит: перша спроба обривається таймаутом, повтор
+  проходить, і картка повна — 200 за 4,6 с (catalog, зависання 4 с) і 6,5 с (repairs, зависання 6 с).
+- `catalog-api` не відповідає: три спроби в межах дедлайну, часткова картка за 8 с. Щойно у вікні
+  набирається `MinimumThroughput` спроб, ланцюг розмикається, і наступні картки приходять за
+  мілісекунди.
+- `repairs-api` не відповідає: дві спроби, 503 за 11 с, далі 503 одразу.
+- SQL Server зупинено: картка повертає 503, а не 500.
+
+### Кеш без Redis
+
+Кеш є необов'язковою залежністю. Операції з Redis у `Catalog.Bll/Caching/TwoLevelCache.cs` і
+`Platform.Aggregator/Caching/RepairOrderCardCache.cs` загорнуто в `try/catch`. Збій пишеться в журнал
+(Warning) і в лічильник `cache.errors`, запит обслуговують L1 і база (агрегатор збирає картку з
+сервісів), а наступні 30 с Redis не опитується. Поки Redis недоступний, команда чекає таймауту
+клієнта, тому `AsyncTimeout` і `SyncTimeout` зменшено з 5 с до 1 с. Перший запит після зникнення
+Redis тепер триває 1,1–1,7 с замість 6 с і вкладається в таймаут спроби агрегатора для Catalog (3 с).
+
+### Бізнес-метрики
+
+Кожен сервіс має клас метрик у `<Сервіс>.Api/Metrics/`. Клас зареєстровано як Singleton, а Meter з
+назвою проєкту створюється через `IMeterFactory`. Meter-и сервісів і `Polly` підключено в
+`Platform.ServiceDefaults/Extensions.cs`. Лічильник збільшується одразу після успішної операції.
+Тривалість записується для всіх виконань, включно з невдалими, з тегом `status` = `success` або
+`failure`. Gauge віддає знімок, який фонова служба (`MetricsSnapshotService`) оновлює раз на 30 с;
+її запити до бази в traces не потрапляють.
+
+| Meter | Інструмент | Тип, одиниця | Теги та їхні значення |
+|-------|-----------|--------------|------------------------|
+| `Repairs.Api` | `repair_orders.created` | Counter, `{order}` | `device.type`: Smartphone, Laptop, Tablet, Desktop, Tv, Appliance, Other |
+| | `repair_orders.status_changed` | Counter, `{order}` | `repair_order.status`: Diagnosed … Issued, Cancelled |
+| | `repair_orders.items_added` | Counter, `{item}` | — |
+| | `repair_orders.operation.duration` | Histogram, ms | `operation`: create, add_item, change_status; `status` |
+| | `repair_orders.open` | ObservableGauge, `{order}` | `repair_order.status`: Accepted, Diagnosed, Approved, InRepair, Ready, Paid |
+| `Catalog.Api` | `catalog_items.created` | Counter, `{item}` | `catalog_item.type`: Part, Service |
+| | `catalog_items.price_changed` | Counter, `{item}` | `catalog_item.type` |
+| | `catalog_items.deleted` | Counter, `{item}` | — |
+| | `catalog_items.operation.duration` | Histogram, ms | `operation`: create, update, change_price, delete; `status` |
+| | `catalog_items.active` | ObservableGauge, `{item}` | `catalog_item.type` |
+| `Reviews.WebApi` | `reviews.created` | Counter, `{review}` | `review.type`: repair, item; `review.rating`: 1–5 |
+| | `reviews.replied` | Counter, `{review}` | — |
+| | `reviews.comments_added` | Counter, `{comment}` | `author.kind`: staff, customer |
+| | `reviews.operation.duration` | Histogram, ms | `operation`: create, reply, add_comment; `status` |
+| | `reviews.published` | ObservableGauge, `{review}` | `review.type` |
+
+Кожен тег має скінченний набір значень (не більше восьми). Ідентифікатори замовлень, клієнтів і
+відгуків та мітки часу в теги не потрапляють: вони є в логах і traces, а в метриках кожна унікальна
+комбінація тегів стала б окремим часовим рядом. Теги `operation` і `status` однакові в усіх сервісах.
+
+Що відстежувати:
+
+| Метрика | Норма | Привід розібратися |
+|---------|-------|--------------------|
+| `resilience.polly.strategy.events`, `OnCircuitOpened` | 0 | будь-яке розмикання: сервіс систематично відмовляє |
+| `resilience.polly.strategy.events`, `OnRetry` | поодинокі | серія повторів до одного сервісу |
+| `*.operation.duration`, p90 | десятки мілісекунд | понад 500 мс або зростання частки `status = failure` |
+| `cache.errors` (`Catalog.Cache`, `Platform.Cache`) | 0 | Redis недоступний, запити йдуть у базу |
+| `repair_orders.open` | залежить від завантаження майстерні | зростання `Ready` без зростання `Issued`: пристрої не забирають |
+
+П'ять нових замовлень і зміна статусу: лічильник `repair_orders.created` за типом пристрою, розподіл
+тривалості операцій (неуспішна зміна статусу дає `status = failure`) і gauge відкритих замовлень:
+
+![Метрика repair_orders.created з тегом device.type](docs/img/metrics-repair-orders-created.png)
+
+![Гістограма repair_orders.operation.duration: P50, P90, P99 з тегами operation і status](docs/img/metrics-repair-orders-duration.png)
+
+![Gauge repair_orders.open: 3, потім 8 відкритих замовлень](docs/img/metrics-repair-orders-open.png)
+
+### Health checks
+
+`MapDefaultEndpoints()` з ServiceDefaults публікує endpoints в усіх середовищах, бо їх опитують
+оркестратори. Відповідь не містить текстів винятків і рядків підключення, лише тип помилки. Шлюз ці
+шляхи не маршрутизує.
+
+| Endpoint | Перевірки | Відповідь |
+|----------|-----------|-----------|
+| `/health/live` | лише `self` (тег `live`): процес живий, зовнішні залежності не перевіряються | 200, JSON, без звернень до баз |
+| `/health/ready` | усі перевірки з тегом `ready`, JSON з деталями кожної | Healthy і Degraded → 200, Unhealthy → 503 |
+| `/health` | усі перевірки, JSON | для діагностики |
+
+| Ресурс | Перевірка | Що робить | Статус збою | Таймаут | Теги |
+|--------|-----------|-----------|-------------|---------|------|
+| усі | `self` | — | — | — | `live` |
+| `repairs-api` | `repairs-db` | `SELECT 1` | Unhealthy | 5 с | `database`, `sql`, `ready` |
+| `catalog-api` | `catalog-db` | `SELECT 1` | Unhealthy | 5 с | `database`, `sql`, `ready` |
+| `catalog-api` | `redis-cache` | `PING` | Degraded | 3 с | `cache`, `redis`, `ready` |
+| `catalog-api` | `cache` | статистика L1 і доступність L2 | Degraded | — | `cache` |
+| `reviews-api` | `reviews-db` | `{ ping: 1 }` | Unhealthy | 5 с | `database`, `mongodb`, `ready` |
+| `aggregator` | `repairs-api`, `catalog-api` | gRPC `Health.Check`, дедлайн 2 с | Unhealthy | 3 с | `grpc`, `downstream`, `ready` |
+| `aggregator` | `reviews-api` | gRPC `Health.Check`, дедлайн 2 с | Degraded | 3 с | `grpc`, `downstream`, `ready` |
+| `aggregator` | `redis-cache` | `PING` | Degraded | 3 с | `cache`, `redis`, `ready` |
+
+Реєстрацію перевірок сервісів зібрано в `<Сервіс>.Api/HealthChecks/`. Сервіси підтримують
+стандартний gRPC Health Checking Protocol (`AddGrpcHealthChecks()` і `MapGrpcHealthChecksService()`):
+статус служби `""` будується з перевірок із тегом `ready`, і Degraded відповідає `SERVING`. Агрегатор
+перевіряє сервіси власним `DownstreamGrpcHealthCheck` через `Health.HealthClient`. Ці клієнти не мають
+повторів, а `RpcException` перетворюється на статус збою реєстрації й пишеться в журнал. Без
+`reviews-api` агрегатор лише Degraded, бо повертає часткові картки.
+
+Redis перевіряє власний `RedisCacheHealthCheck` (у ServiceDefaults), а не пакет
+`AspNetCore.HealthChecks.Redis`. Перевірка з пакета ігнорувала таймаут і чекала відповіді клієнта
+близько 5 с. Через це `/health/ready` catalog-api відповідав за 5,5 с, gRPC Health не вкладався в
+дедлайн агрегатора, і агрегатор вважав catalog-api Unhealthy, хоча той працював. Тепер відключений
+Redis визначається одразу, і `/health/ready` відповідає за 10–15 мс. Власну перевірку Redis
+Aspire-інтеграції `AddRedisDistributedCache` (зі статусом Unhealthy) вимкнено (`DisableHealthChecks`).
+
+В AppHost кожен проєкт має `WithHttpHealthCheck("/health/ready")`. Dashboard показує стан ресурсу, а
+`WaitFor` чекає, поки залежність стане здоровою, а не лише запуститься. Aspire розрізняє тільки код
+відповіді, тож Degraded (200) у Resources показано як здоровий стан; деталі видно в JSON
+`/health/ready`.
+
+Перевірка:
+
+- **Redis зупинено.** `/health/ready` catalog-api й агрегатора повертає 200 зі статусом
+  `Degraded`, сервіси відповідають, картки повні. Після запуску Redis статус знову `Healthy`.
+- **SQL Server зупинено.** `/health/live` repairs-api і catalog-api повертає 200, а `/health/ready` —
+  503. Агрегатор стає Unhealthy через `repairs-api` і `catalog-api`. Після запуску SQL Server усі
+  ресурси здорові без перезапуску сервісів.
+
+```bash
+curl -i http://localhost:5078/health/ready
+```
+
+![/health/ready catalog-api при зупиненому Redis: Degraded, catalog-db Healthy, redis-cache Degraded](docs/img/health-ready-degraded.png)
+
+![Resources при зупиненому Redis: redis Exited, catalog-api і aggregator Running](docs/img/resources-redis-down.png)
+
+![Resources при зупиненому SQL Server: repairs-api, catalog-api і aggregator Running (Unhealthy), reviews-api і gateway здорові](docs/img/resources-sql-down.png)
+
+Типові фільтри Dashboard:
+
+- *Structured logs*, ресурс `aggregator`, пошук `Circuit breaker of` показує переходи ланцюга, а
+  категорія `Polly` — повтори й таймаути.
+- *Metrics*, `aggregator` → `Polly` → `resilience.polly.strategy.events`, фільтри `event.name` і
+  `pipeline.name`.
+- *Metrics*, `repairs-api` → `Repairs.Api` → `repair_orders.created`, фільтр `device.type`.
+- *Resources*: клік на ресурс показує його health checks.
 
 ## Схема рішення
 
