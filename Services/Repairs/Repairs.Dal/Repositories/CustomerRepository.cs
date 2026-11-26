@@ -5,7 +5,6 @@ using Repairs.Domain.Models;
 
 namespace Repairs.Dal.Repositories;
 
-// Свідомо без IGenericRepository<T>: показує роботу з підключенням, параметрами й reader на чистому ADO.NET
 public sealed class CustomerRepository : RepositoryBase, ICustomerRepository
 {
     public CustomerRepository(SqlConnection connection, Func<SqlTransaction?> currentTransaction)

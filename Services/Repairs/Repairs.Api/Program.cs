@@ -4,6 +4,8 @@ using Platform.ServiceDefaults.Correlation;
 using Platform.ServiceDefaults.Grpc;
 using Repairs.Api.ExceptionHandling;
 using Repairs.Api.Grpc;
+using Repairs.Api.HealthChecks;
+using Repairs.Api.Metrics;
 using Repairs.Bll.Interfaces;
 using Repairs.Bll.Mapping;
 using Repairs.Bll.Services;
@@ -21,6 +23,10 @@ builder.Services.AddScoped<IUnitOfWork>(_ => new UnitOfWork(connectionString));
 builder.Services.AddScoped<ICustomerService, CustomerService>();
 builder.Services.AddScoped<ICatalogItemService, CatalogItemService>();
 builder.Services.AddScoped<IRepairOrderService, RepairOrderService>();
+
+builder.Services.AddRepairOrderMetrics();
+
+builder.Services.AddRepairsHealthChecks(connectionString);
 
 builder.Services.AddAutoMapper(cfg =>
 {
@@ -44,6 +50,8 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel
 builder.Services
     .AddGrpc(options => options.EnableDetailedErrors = builder.Environment.IsDevelopment())
     .AddServerLogging();
+builder.Services.AddGrpcHealthChecks(options =>
+    options.Services.Map(string.Empty, check => check.Tags.Contains(Extensions.ReadyTag)));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -61,6 +69,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapControllers();
 app.MapGrpcService<RepairsGrpcService>();
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 
 app.Run();
