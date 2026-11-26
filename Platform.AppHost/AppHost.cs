@@ -2,7 +2,6 @@ var builder = DistributedApplication.CreateBuilder(args);
 
 var sqlPassword = builder.AddParameter("sql-password", secret: true);
 
-// The Lucky Penny key is optional: without it AutoMapper and MediatR only log a license warning.
 var licenseKey = builder.Configuration["Parameters:luckypenny-license-key"] is { Length: > 0 }
     ? builder.AddParameter("luckypenny-license-key", secret: true)
     : null;
@@ -28,17 +27,13 @@ var mongo = builder.AddMongoDB("mongo")
 
 var reviewsDb = mongo.AddDatabase("ReviewsDb");
 
-// The resource name becomes ConnectionStrings:redis, which catalog-api (the cached reference data)
-// and the aggregator read with AddRedisDistributedCache("redis"); the volume keeps L2 across restarts.
 var redis = builder.AddRedis("redis")
     .WithDataVolume();
 
-// Each service exposes REST on the "http" endpoint and gRPC on the HTTP/2-only "grpc" endpoint
-// declared in its Kestrel:Endpoints section; the aggregator resolves the latter as http://_grpc.<service>.
 var repairs = builder.AddProject<Projects.Repairs_Api>("repairs-api")
     .WithReference(repairsDb)
     .WaitFor(repairsDb)
-    .WithHttpHealthCheck("/health")
+    .WithHttpHealthCheck("/health/ready")
     .WithLicenseKey("AutoMapper__LicenseKey", licenseKey);
 
 var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
@@ -46,13 +41,13 @@ var catalog = builder.AddProject<Projects.Catalog_Api>("catalog-api")
     .WaitFor(catalogDb)
     .WithReference(redis)
     .WaitFor(redis)
-    .WithHttpHealthCheck("/health")
+    .WithHttpHealthCheck("/health/ready")
     .WithLicenseKey("AutoMapper__LicenseKey", licenseKey);
 
 var reviews = builder.AddProject<Projects.Reviews_WebApi>("reviews-api")
     .WithReference(reviewsDb)
     .WaitFor(reviewsDb)
-    .WithHttpHealthCheck("/health")
+    .WithHttpHealthCheck("/health/ready")
     .WithLicenseKey("LuckyPenny__LicenseKey", licenseKey);
 
 var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
@@ -60,7 +55,7 @@ var aggregator = builder.AddProject<Projects.Platform_Aggregator>("aggregator")
     .WithReference(catalog).WaitFor(catalog)
     .WithReference(reviews).WaitFor(reviews)
     .WithReference(redis).WaitFor(redis)
-    .WithHttpHealthCheck("/health");
+    .WithHttpHealthCheck("/health/ready");
 
 builder.AddProject<Projects.Platform_ApiGateway>("gateway")
     .WithHttpEndpoint(port: 5000, name: "public")
@@ -69,7 +64,7 @@ builder.AddProject<Projects.Platform_ApiGateway>("gateway")
     .WithReference(reviews)
     .WithReference(aggregator)
     .WaitFor(aggregator)
-    .WithHttpHealthCheck("/health", endpointName: "public");
+    .WithHttpHealthCheck("/health/ready", endpointName: "public");
 
 builder.Build().Run();
 
