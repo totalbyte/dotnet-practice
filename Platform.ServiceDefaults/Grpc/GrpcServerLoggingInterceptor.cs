@@ -12,8 +12,6 @@ public sealed class GrpcServerLoggingInterceptor(ILogger<GrpcServerLoggingInterc
     public override async Task<TResponse> UnaryServerHandler<TRequest, TResponse>(
         TRequest request, ServerCallContext context, UnaryServerMethod<TRequest, TResponse> continuation)
     {
-        // The scope tags everything logged inside the call (cache hits included), so gRPC traffic
-        // can be told apart from REST requests in the structured logs.
         using var scope = logger.BeginScope(new Dictionary<string, object>
         {
             ["Transport"] = Transport,

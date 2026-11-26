@@ -65,7 +65,5 @@ public sealed class CorrelationIdMiddleware(RequestDelegate next, ILogger<Correl
         value.Length is > 0 and <= MaxLength
         && value.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.');
 
-    private static bool IsProbe(PathString path) =>
-        path.StartsWithSegments(Extensions.HealthEndpointPath)
-        || path.StartsWithSegments(Extensions.AlivenessEndpointPath);
+    private static bool IsProbe(PathString path) => path.StartsWithSegments(Extensions.HealthEndpointPath);
 }

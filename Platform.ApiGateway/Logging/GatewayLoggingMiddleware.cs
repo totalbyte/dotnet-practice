@@ -13,8 +13,7 @@ public sealed class GatewayLoggingMiddleware(
     public async Task InvokeAsync(HttpContext context)
     {
         var request = context.Request;
-        if (request.Path.StartsWithSegments(Extensions.HealthEndpointPath)
-            || request.Path.StartsWithSegments(Extensions.AlivenessEndpointPath))
+        if (request.Path.StartsWithSegments(Extensions.HealthEndpointPath))
         {
             await next(context);
             return;

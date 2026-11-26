@@ -10,6 +10,7 @@ using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
 using OpenTelemetry.Trace;
 using Platform.ServiceDefaults.Correlation;
+using Platform.ServiceDefaults.HealthChecks;
 using Serilog;
 using Serilog.Events;
 using Serilog.Formatting.Compact;
@@ -19,8 +20,14 @@ namespace Microsoft.Extensions.Hosting;
 public static class Extensions
 {
     public const string HealthEndpointPath = "/health";
-    public const string AlivenessEndpointPath = "/alive";
+    public const string LivenessEndpointPath = "/health/live";
+    public const string ReadinessEndpointPath = "/health/ready";
+    public const string LiveTag = "live";
+    public const string ReadyTag = "ready";
     public const string CacheMeterSuffix = ".Cache";
+    public const string PollyMeter = "Polly";
+
+    public static readonly string[] ServiceMeters = ["Repairs.Api", "Catalog.Api", "Reviews.WebApi"];
 
     private const string ResilienceSection = "HttpClientResilience";
     private const string MongoDbActivitySource = "MongoDB.Driver.Core.Extensions.DiagnosticSources";
@@ -41,7 +48,7 @@ public static class Extensions
 
         builder.Services.ConfigureHttpClientDefaults(http =>
         {
-            var pipeline = http.AddStandardResilienceHandler();
+            var pipeline = http.AddStandardResilienceHandler(options => options.Retry.DisableForUnsafeHttpMethods());
             if (resilience.Exists())
                 pipeline.Configure(resilience);
 
@@ -57,7 +64,6 @@ public static class Extensions
         var serviceName = builder.Environment.ApplicationName;
         var minimumLevel = builder.Environment.IsDevelopment() ? LogEventLevel.Debug : LogEventLevel.Information;
 
-        // Serilog replaces the default providers; only the OpenTelemetry provider added below receives its events.
         builder.Logging.ClearProviders();
 
         builder.Services.AddSerilog((_, configuration) => configuration
@@ -69,7 +75,7 @@ public static class Extensions
             .MinimumLevel.Override("Microsoft.Extensions.Diagnostics.HealthChecks", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft.Extensions.Http", LogEventLevel.Information)
             .MinimumLevel.Override("Microsoft.Extensions.ServiceDiscovery", LogEventLevel.Information)
-            .MinimumLevel.Override("Polly", LogEventLevel.Warning)
+            .MinimumLevel.Override("Polly", LogEventLevel.Information)
             .MinimumLevel.Override("Grpc", LogEventLevel.Information)
             .Enrich.FromLogContext()
             .Enrich.WithProperty("ServiceName", serviceName)
@@ -87,8 +93,6 @@ public static class Extensions
         var applicationName = builder.Environment.ApplicationName;
         var servicePrefix = applicationName.Split('.')[0];
         var serviceSources = servicePrefix + ".*";
-        // Cache meters follow the "<Service>.Cache" convention: Catalog.Cache in catalog-api and Platform.Cache
-        // in the aggregator; they publish cache.hits / cache.misses tagged by cache.level (L1 / L2).
         var cacheMeter = servicePrefix + CacheMeterSuffix;
         var sampler = builder.Environment.IsDevelopment()
             ? (Sampler)new AlwaysOnSampler()
@@ -108,7 +112,9 @@ public static class Extensions
             ]))
             .WithMetrics(metrics => metrics
                 .AddMeter(applicationName)
+                .AddMeter(ServiceMeters)
                 .AddMeter(cacheMeter)
+                .AddMeter(PollyMeter)
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
                 .AddRuntimeInstrumentation())
@@ -118,8 +124,7 @@ public static class Extensions
                 .AddSource(serviceSources)
                 .AddSource(MongoDbActivitySource)
                 .AddAspNetCoreInstrumentation(options => options.Filter = context =>
-                    !context.Request.Path.StartsWithSegments(HealthEndpointPath)
-                    && !context.Request.Path.StartsWithSegments(AlivenessEndpointPath))
+                    !context.Request.Path.StartsWithSegments(HealthEndpointPath))
                 .AddHttpClientInstrumentation()
                 .AddSqlClientInstrumentation());
 
@@ -132,22 +137,29 @@ public static class Extensions
     public static TBuilder AddDefaultHealthChecks<TBuilder>(this TBuilder builder) where TBuilder : IHostApplicationBuilder
     {
         builder.Services.AddHealthChecks()
-            .AddCheck("self", () => HealthCheckResult.Healthy(), ["live"]);
+            .AddCheck("self", () => HealthCheckResult.Healthy(), [LiveTag]);
 
         return builder;
     }
 
     public static WebApplication MapDefaultEndpoints(this WebApplication app)
     {
-        // Health endpoints expose dependency state, so they are published only in Development.
-        if (app.Environment.IsDevelopment())
+        app.MapHealthChecks(HealthEndpointPath, new HealthCheckOptions
         {
-            app.MapHealthChecks(HealthEndpointPath);
-            app.MapHealthChecks(AlivenessEndpointPath, new HealthCheckOptions
-            {
-                Predicate = registration => registration.Tags.Contains("live")
-            });
-        }
+            ResponseWriter = HealthReportJsonWriter.WriteAsync
+        });
+
+        app.MapHealthChecks(LivenessEndpointPath, new HealthCheckOptions
+        {
+            Predicate = registration => registration.Tags.Contains(LiveTag),
+            ResponseWriter = HealthReportJsonWriter.WriteAsync
+        });
+
+        app.MapHealthChecks(ReadinessEndpointPath, new HealthCheckOptions
+        {
+            Predicate = registration => registration.Tags.Contains(ReadyTag),
+            ResponseWriter = HealthReportJsonWriter.WriteAsync
+        });
 
         return app;
     }
