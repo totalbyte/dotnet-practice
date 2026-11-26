@@ -1,6 +1,8 @@
 using System.Text.Json.Serialization;
 using Catalog.Api.ExceptionHandling;
 using Catalog.Api.Grpc;
+using Catalog.Api.HealthChecks;
+using Catalog.Api.Metrics;
 using Catalog.Bll.Caching;
 using Catalog.Bll.Mapping;
 using Catalog.Bll.Validation;
@@ -33,9 +35,18 @@ builder.Services.AddMemoryCache(options =>
     options.ExpirationScanFrequency = TimeSpan.FromSeconds(30);
     options.TrackStatistics = true;
 });
-builder.AddRedisDistributedCache("redis");
+builder.AddRedisDistributedCache("redis",
+    settings => settings.DisableHealthChecks = true,
+    options =>
+    {
+        options.AsyncTimeout = 1000;
+        options.SyncTimeout = 1000;
+    });
 builder.Services.AddCatalogServicesWithCaching(builder.Configuration);
-builder.Services.AddHealthChecks().AddCheck<CacheStatisticsHealthCheck>("cache");
+
+builder.Services.AddCatalogMetrics();
+
+builder.Services.AddCatalogHealthChecks(connectionString);
 
 builder.Services.AddAutoMapper(cfg =>
 {
@@ -62,6 +73,8 @@ builder.WebHost.ConfigureKestrel(kestrel => kestrel
 builder.Services
     .AddGrpc(options => options.EnableDetailedErrors = builder.Environment.IsDevelopment())
     .AddServerLogging();
+builder.Services.AddGrpcHealthChecks(options =>
+    options.Services.Map(string.Empty, check => check.Tags.Contains(Extensions.ReadyTag)));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
@@ -87,6 +100,7 @@ if (app.Environment.IsDevelopment())
 
 app.MapControllers();
 app.MapGrpcService<CatalogGrpcService>();
+app.MapGrpcHealthChecksService();
 app.MapDefaultEndpoints();
 
 app.Run();

@@ -1,4 +1,5 @@
 using System.Net.Mime;
+using Catalog.Api.Metrics;
 using Catalog.Bll.Dtos;
 using Catalog.Bll.Dtos.CatalogItems;
 using Catalog.Bll.Interfaces;
@@ -9,7 +10,7 @@ namespace Catalog.Api.Controllers;
 
 [ApiController]
 [Route("api/catalog-items")]
-public sealed class CatalogItemsController(ICatalogItemService items) : ApiControllerBase
+public sealed class CatalogItemsController(ICatalogItemService items, CatalogMetrics metrics) : ApiControllerBase
 {
     [HttpGet]
     [ProducesResponseType<PagedResult<CatalogItemDto>>(StatusCodes.Status200OK, MediaTypeNames.Application.Json)]
@@ -43,7 +44,8 @@ public sealed class CatalogItemsController(ICatalogItemService items) : ApiContr
         if (await ValidateAsync(validator, input, ct) is { } problem)
             return problem;
 
-        var created = await items.CreateAsync(input, ct);
+        var created = await metrics.MeasureAsync("create", () => items.CreateAsync(input, ct));
+        metrics.ItemCreated(created.ItemType);
         return CreatedAtAction(nameof(GetById), new { id = created.Id }, created);
     }
 
@@ -61,7 +63,7 @@ public sealed class CatalogItemsController(ICatalogItemService items) : ApiContr
         if (await ValidateAsync(validator, input, ct) is { } problem)
             return problem;
 
-        await items.UpdateAsync(id, input, ct);
+        await metrics.MeasureAsync("update", () => items.UpdateAsync(id, input, ct));
         return NoContent();
     }
 
@@ -79,7 +81,9 @@ public sealed class CatalogItemsController(ICatalogItemService items) : ApiContr
         if (await ValidateAsync(validator, input, ct) is { } problem)
             return problem;
 
-        return Ok(await items.ChangePriceAsync(id, input, ct));
+        var updated = await metrics.MeasureAsync("change_price", () => items.ChangePriceAsync(id, input, ct));
+        metrics.PriceChanged(updated.ItemType);
+        return Ok(updated);
     }
 
     [HttpDelete("{id:long}")]
@@ -87,7 +91,8 @@ public sealed class CatalogItemsController(ICatalogItemService items) : ApiContr
     [ProducesResponseType<ProblemDetails>(StatusCodes.Status404NotFound, MediaTypeNames.Application.ProblemJson)]
     public async Task<IActionResult> Delete(long id, CancellationToken ct)
     {
-        await items.DeleteAsync(id, ct);
+        await metrics.MeasureAsync("delete", () => items.DeleteAsync(id, ct));
+        metrics.ItemDeleted();
         return NoContent();
     }
 
